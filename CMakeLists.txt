@@ -95,14 +95,8 @@ target_link_libraries(mkw PRIVATE
   m stdc++ pthread)
 
 vita_create_self(eboot.bin mkw UNSAFE)
-# The bubble icon and LiveArea from the player's disc (tools/vita/livearea_art.py,
-# run by tools/vita/build_assets.py), else plain placeholders.
-if(EXISTS ${CMAKE_SOURCE_DIR}/build/vita/sce_sys_art/icon0.png)
-  set(MKW_SCE_SYS ${CMAKE_SOURCE_DIR}/build/vita/sce_sys_art)
-else()
-  set(MKW_SCE_SYS ${CMAKE_SOURCE_DIR}/platform/vita/sce_sys)
-endif()
+# LiveArea images must be 8-bit indexed PNGs.
 vita_create_vpk(mkw.vpk ${VITA_TITLEID} eboot.bin
   VERSION ${VITA_VERSION}
   NAME ${VITA_APP_NAME}
-  FILE ${MKW_SCE_SYS} sce_sys)
+  FILE ${CMAKE_SOURCE_DIR}/platform/vita/sce_sys sce_sys)

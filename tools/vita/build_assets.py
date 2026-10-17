@@ -52,8 +52,6 @@ def main():
     size = sum(f.stat().st_size for f in OUT.rglob('*') if f.is_file())
     build_cia.log(f'done: {files} files, {size / 2**20:.0f} MiB in {OUT}')
     build_cia.log('Copy the contents of that folder to ux0:data/mkw on your Vita.')
-    # The VPK's bubble icon and LiveArea, from the same disc art.
-    build_cia.run([sys.executable, 'tools/vita/livearea_art.py'])
 
 
 if __name__ == '__main__':
