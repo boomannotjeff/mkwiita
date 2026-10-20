@@ -25,7 +25,8 @@ from PIL import Image, ImageDraw
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT / 'tools'), str(ROOT / 'vendor/gclib')]
-from cook_race_map import courses
+from course_catalog import RR_FIRST_ID, courses
+import race_map_bake as rb
 from cook_race_items import cook_image_sprite, cook_sprite
 
 OUT = ROOT / 'build/race-map'
@@ -45,6 +46,31 @@ def triangles(model_json):
             for i in range(0, len(v) - 2, 3):
                 tris.append((v[i][:3], v[i + 1][:3], v[i + 2][:3]))
     return tris
+
+
+ROAD_TYPES = [0, 1, 5, 6, 7, 8, 9]  # KCL road, slippery road, boost pads and ramps, jump pads, item road
+
+
+def road_triangles(kcl):
+    """The course's drivable road surfaces (world space), seen from above."""
+    a, b, c, kind, face = rb.kcl_triangles(kcl)
+    keep = np.isin(kind, ROAD_TYPES) & (face[:, 1] > 0.3)
+    return [(tuple(p), tuple(q), tuple(r)) for p, q, r in zip(a[keep], b[keep], c[keep])]
+
+
+def on_road(tris, road, n=256):
+    """Share of the map drawing that lies on the road: 1.0 for every retail map."""
+    pts = np.array([p for t in tris + road for p in t])
+    x0, z0 = pts[:, 0].min(), pts[:, 2].min()
+    s = n / max(pts[:, 0].max() - x0, pts[:, 2].max() - z0, 1)
+    def mask(ts):
+        im = Image.new('L', (n, n))
+        draw = ImageDraw.Draw(im)
+        for t in ts:
+            draw.polygon([((p[0] - x0) * s, (p[2] - z0) * s) for p in t], fill=1)
+        return np.array(im, bool)
+    m = mask(tris)
+    return (m & mask(road)).sum() / max(m.sum(), 1)
 
 
 def dilate(mask, radius):
@@ -111,18 +137,26 @@ def main():
     WORK.mkdir(parents=True, exist_ok=True)
     ui = ROOT / 'assets/race-ui/Race/game_image'
     cook_sprite(ui / 'timg/tt_start_line_22.tpl', 'race_minimap_start', OUT)
-    for index, course in enumerate(courses()):
+    def one(course):
+        index = course['index']  # the menu's course number (race_bottom_screen.cpp)
         source = ROOT / 'assets/courses' / course['key'] / 'map_model.brres'
         if not source.is_file():
             print('no map model:', course['name'])
-            continue
+            return
         work = WORK / course['key']
         subprocess.run(['node', str(ROOT / 'build/export_brres.mjs'), str(source), str(work)],
                        check=True, stdout=subprocess.DEVNULL)
         tris = triangles(work / 'model.json')
         if not tris:
             print('empty map model:', course['name'])
-            continue
+            return
+        # Some custom tracks' map models are not in course space (moved or scaled):
+        # racers would miss the drawing, so draw the course's own road instead.
+        if course['id'] >= RR_FIRST_ID:
+            road = road_triangles(ROOT / 'assets/courses' / course['key'] / 'course.kcl')
+            if road and on_road(tris, road) < 0.9:
+                print(f"{course['name']}: map model off the course, drawn from its road")
+                tris = road
         image, (x0, z0, upt, w, h) = bake(tris)
         name = f'race_minimap_{index:02d}'
         record = cook_image_sprite(image, name, OUT)
@@ -130,6 +164,17 @@ def main():
         (OUT / 'textures' / (name + '.bin')).write_bytes(struct.pack('<3f4H', x0, z0, upt, w, h, pw, ph))
         print(f'{course["name"]}: {len(tris)} triangles, {w}x{h}')
 
+    # Each course is an independent Node export and bake: all of them at once.
+    import os
+    from concurrent.futures import ThreadPoolExecutor
+    def guarded(course):
+        try:
+            one(course)
+        except Exception as error:
+            if course['id'] < RR_FIRST_ID: raise
+            print(f"{course['name']}: minimap left out ({str(error)[:120]})", flush=True)
+    with ThreadPoolExecutor(max_workers=os.cpu_count() or 4) as pool:
+        list(pool.map(guarded, courses()))
 
 if __name__ == '__main__':
     main()

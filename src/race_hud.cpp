@@ -761,9 +761,9 @@ void RaceHud::drawOverlay(Renderer& renderer,const RaceItems& items,unsigned sta
     if(battle.active)drawBattle(renderer,exitLift(1.f));
     else{
     gold(impl_->extras[HudLap],HudExtras[HudLap],lifted(HudLapLabel,-lapLift));gold(impl_->extras[HudSlash],HudExtras[HudSlash],lifted(HudLapSlash,-lapLift));
-    lap=std::clamp(lap,1u,3u);
+    const unsigned laps=std::clamp(lapCount,1u,9u);lap=std::clamp(lap,1u,laps);
     gold(impl_->digits[lap],HudDigits[lap],lifted(HudLapCurrent,-lapLift));
-    gold(impl_->digits[3],HudDigits[3],lifted(HudLapTotal,-lapLift));
+    gold(impl_->digits[laps],HudDigits[laps],lifted(HudLapTotal,-lapLift));
     }
     // Speedometer (not in the original): the player's speed in the game's own
     // units, which Wii speedometer mods label km/h. Bottom right, the one free

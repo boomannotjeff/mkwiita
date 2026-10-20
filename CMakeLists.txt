@@ -15,8 +15,18 @@ endif()
 project(mkw_vita C CXX)
 include("$ENV{VITASDK}/share/vita.cmake" REQUIRED)
 
-set(VITA_APP_NAME "Mario Kart Wii")
-set(VITA_TITLEID "MKWV00001")
+set(MKW_VARIANT "retail" CACHE STRING "Game edition: retail, or rr (Retro Rewind, a separate app)")
+if(MKW_VARIANT STREQUAL "rr")
+  set(VITA_APP_NAME "MKW Retro Rewind")
+  set(VITA_TITLEID "MKWR00001")
+  set(MKW_DATA_ROOT "ux0:data/mkwrr")
+  set(MKW_SCE_SYS ${CMAKE_SOURCE_DIR}/platform/vita-rr/sce_sys)
+else()
+  set(VITA_APP_NAME "Mario Kart Wii")
+  set(VITA_TITLEID "MKWV00001")
+  set(MKW_DATA_ROOT "ux0:data/mkw")
+  set(MKW_SCE_SYS ${CMAKE_SOURCE_DIR}/platform/vita/sce_sys)
+endif()
 set(VITA_VERSION "01.00")
 option(MKW_RELEASE "No test hooks or runtime log" OFF)
 
@@ -39,7 +49,10 @@ set(MKW_CODEGEN -mcpu=cortex-a9 -mfpu=neon -O2 -g -ffunction-sections -fdata-sec
   # Some state (Kinoko's Vector3f, members without initializers) relied on
   # memory the 3DS happened to hand over zeroed; zero every automatic.
   -ftrivial-auto-var-init=zero)
-set(MKW_DEFINES __3DS__ __vita__ REVOLUTION)
+set(MKW_DEFINES __3DS__ __vita__ REVOLUTION "MKW_DATA_ROOT=\"${MKW_DATA_ROOT}\"")
+if(MKW_VARIANT STREQUAL "rr")
+  list(APPEND MKW_DEFINES MKW_RR)
+endif()
 if(MKW_RELEASE)
   list(APPEND MKW_DEFINES MKW_RELEASE KINOKO_QUIET)
 else()
@@ -55,6 +68,15 @@ set(MKW_INCLUDES
   ${KINOKO}/include
   ${KINOKO}/source
   ${GEN})
+if(MKW_VARIANT STREQUAL "rr")
+  # The Retro Rewind cook writes its own course, lighting, menu and skin headers
+  # here (tools/course_catalog.py generated()); include/mkw keeps the retail ones.
+  set(MKW_RR_INCLUDE ${CMAKE_SOURCE_DIR}/build/rr-include)
+  if(NOT EXISTS ${MKW_RR_INCLUDE}/mkw/course_catalog.hpp)
+    message(FATAL_ERROR "No Retro Rewind headers in build/rr-include: cook first (tools/vita/build.py --rr ...)")
+  endif()
+  list(PREPEND MKW_INCLUDES ${MKW_RR_INCLUDE})
+endif()
 
 file(GLOB_RECURSE kinoko_src ${KINOKO}/source/*.cc)
 list(FILTER kinoko_src EXCLUDE REGEX "/(main|KReplaySystem|Context)\\.cc$")
@@ -99,4 +121,4 @@ vita_create_self(eboot.bin mkw UNSAFE)
 vita_create_vpk(mkw.vpk ${VITA_TITLEID} eboot.bin
   VERSION ${VITA_VERSION}
   NAME ${VITA_APP_NAME}
-  FILE ${CMAKE_SOURCE_DIR}/platform/vita/sce_sys sce_sys)
+  FILE ${MKW_SCE_SYS} sce_sys)

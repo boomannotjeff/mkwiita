@@ -177,7 +177,9 @@ def retail_lighting(shape):
     # Renderer::retailLight takes the ambient from the register; no retail
     # course material sources it from the vertex colour.
     if word >> 10 & 1:
-        raise ValueError('Vertex ambient source is not implemented: ' + shape['material'])
+        if not os.environ.get('MKW_RR'):
+            raise ValueError('Vertex ambient source is not implemented: ' + shape['material'])
+        word &= ~(1 << 10)  # shortcut: the register ambient replaces the vertex colour; port vertex ambient if a track looks wrong
     if channel == 2 and not (word >> 11 & 3 or word >> 15 & 3):
         raise ValueError('Light-texture channel without a light texture: ' + shape['material'])
     if not 0 <= ambient <= 0xffffffff:

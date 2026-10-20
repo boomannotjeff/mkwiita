@@ -1,10 +1,25 @@
 #!/usr/bin/env python3
 """Stage a private playable SD package from the user's locally cooked assets."""
-import hashlib,json,shutil,struct,zipfile
+import hashlib,json,os,shutil,struct,zipfile
+from course_catalog import courses
 from gx_material import GMDL_SUBMESH_BYTES
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1];assets=ROOT/'sd-card/3ds/mkw-3ds';out=ROOT/'build/playable/3ds/mkw-3ds';out.mkdir(parents=True,exist_ok=True)
 roster_overlay=ROOT/'build/roster'
+# sha256 by path, size and modification time: an unchanged file is not hashed
+# again (this script runs twice a build: tools/pack_race_assets.py, then staging).
+DIGESTS=ROOT/'build/package-digests.json'
+try:_digests=json.loads(DIGESTS.read_text())
+except (OSError,ValueError):_digests={}
+def digest_file(path):
+ st=path.stat();key=str(path);hit=_digests.get(key)
+ if hit and hit[0]==st.st_size and hit[1]==st.st_mtime_ns:return hit[2]
+ digest=hashlib.sha256()
+ with path.open('rb') as source:
+  for block in iter(lambda:source.read(1024*1024),b''):digest.update(block)
+ _digests[key]=[st.st_size,st.st_mtime_ns,digest.hexdigest()];return _digests[key][2]
+import atexit
+atexit.register(lambda:DIGESTS.write_text(json.dumps(_digests)))
 def roster_asset(relative):
  relative=Path(relative)
  if relative.is_absolute() or '..' in relative.parts:raise ValueError('Invalid roster asset path')
@@ -15,15 +30,17 @@ files={ROOT/'data/extracted/Race/Common.szs':Path('Race/Common.szs')}
 # The 3DS program, when built (the Vita build has none: tools/vita/build_assets.py).
 if (ROOT/'build/mkw-3ds.3dsx').is_file():files[ROOT/'build/mkw-3ds.3dsx']=Path('mkw-3ds.3dsx')
 catalog=json.loads((assets/'models/course-catalog.json').read_text())
-if catalog.get('version')!=1 or len(catalog.get('courses',[]))!=42:raise ValueError('Import all 32 races and 10 arenas before packaging')
+if catalog.get('version')!=1 or len(catalog.get('courses',[]))!=sum(c.get('selected',c['cooked']) for c in courses(False)):raise ValueError('Import all 32 races and 10 arenas before packaging')
 files[assets/'models/course-catalog.json']=Path('models/course-catalog.json')
 models=['coconut_palm_000','coconut_escalator_000']
 for course in catalog['courses']:
+ # A Retro Rewind track that failed to import is listed as not available (tools/import_courses.py).
+ if course['status']!='imported' and os.environ.get('MKW_RR') and course['kind']=='race':print('not available:',course['name'],file=__import__('sys').stderr);continue
  if course['status']!='imported':raise ValueError('Course import failed: '+course['name'])
  archive=Path(course['archive']);receipt=Path(course['receipt'])
  if archive.parent!=Path('Race/Course') or archive.suffix!='.szs' or receipt.parent!=Path('models/courses'):raise ValueError('Invalid course path')
  source=ROOT/'data/extracted'/archive
- if hashlib.sha256(source.read_bytes()).hexdigest()!=course['archive_sha256']:raise ValueError('Source archive changed: '+course['name'])
+ if digest_file(source)!=course['archive_sha256']:raise ValueError('Source archive changed: '+course['name'])
  files[source]=archive;files[assets/receipt]=receipt
  # Placed objects: tools/cook_course_objects.py meshes and animation banks.
  visuals=assets/f"models/course_{course['id']:02d}_visuals.list"
@@ -45,11 +62,17 @@ for course in catalog['courses']:
   for model in (assets/relative).read_text().split():
    if not model or any(c not in 'abcdefghijklmnopqrstuvwxyz_0123456789' for c in model):raise ValueError('Invalid course model name')
    models.append(model)
+# Retro Rewind tracks' own music (tools/rr_overlay.py), streamed in place of their music slot's (race_sound.cpp).
+for course in catalog['courses']:
+ if os.environ.get('MKW_RR') and course['status']=='imported':
+  for suffix in ('_N','_Final'):
+   music=ROOT/'data/extracted/sound/strm'/f"{course['key']}{suffix}.brstm"
+   if music.is_file():files[music]=Path('audio/rr')/music.name
 roster=json.loads(roster_asset('models/roster.json').read_text())
 if roster.get('version')!=1 or len(roster.get('characters',[]))!=24:raise ValueError('Cook all 24 retail drivers with tools/cook_full_roster.py before packaging')
 files[roster_asset('models/roster.json')]=Path('models/roster.json')
 garage=json.loads(roster_asset('models/garage.json').read_text())
-if garage.get('version')!=1 or len(garage.get('choices',[]))!=288:raise ValueError('Cook all 288 retail driver/vehicle combinations before packaging')
+if garage.get('version')!=1 or len(garage.get('choices',[]))<288:raise ValueError('Cook all 288 retail driver/vehicle combinations before packaging')
 files[roster_asset('models/garage.json')]=Path('models/garage.json')
 for choice in garage['choices']:
  prefix=choice['prefix']
@@ -66,20 +89,16 @@ expected={choice['prefix'] for choice in garage['choices']}
 if {row['prefix'] for row in shadow_manifest['choices']}!=expected:raise ValueError('Cook every vehicle shadow before packaging')
 for row in shadow_manifest['choices']:
  relative=Path('models')/(row['prefix']+'shadow.gmdl');source=shadow_root/relative
- if hashlib.sha256(source.read_bytes()).hexdigest()!=row['sha256']:raise ValueError('Vehicle shadow changed: '+str(relative))
+ if digest_file(source)!=row['sha256']:raise ValueError('Vehicle shadow changed: '+str(relative))
  files[source]=relative
 files[shadow_root/'models/vehicle-shadows.json']=Path('models/vehicle-shadows.json')
 textures={'drift_sparkTex2','drift_flash2','drift_rk_smoke2'}
 files[assets/'textures/drift-effects.bin']=Path('textures/drift-effects.bin')
 files[assets/'textures/drift-effects-bike.bin']=Path('textures/drift-effects-bike.bin')
 menu_ui=json.loads((assets/'models/menu-ui.json').read_text())
-if menu_ui.get('version') not in (1,2) or len(menu_ui.get('maps',[]))!=32:raise ValueError('Cook source layouts for all 32 race maps before packaging')
+# Retro Rewind: maps only for the cooked tracks (tools/cook_menu_ui.py).
+if menu_ui.get('version') not in (1,2) or (len(menu_ui.get('maps',[]))!=32 and not os.environ.get('MKW_RR')):raise ValueError('Cook source layouts for all 32 race maps before packaging')
 files[assets/'models/menu-ui.json']=Path('models/menu-ui.json')
-def digest_file(path):
- digest=hashlib.sha256()
- with path.open('rb') as source:
-  for block in iter(lambda:source.read(1024*1024),b''):digest.update(block)
- return digest.hexdigest()
 # Validate source receipts before mixing cooked UI revisions into a package.
 for name,expected in menu_ui.get('sourceHashes',{}).items():
  source=ROOT/name
@@ -124,7 +143,7 @@ for entry in menu_models['models']:
  models.append(model)
  animation=assets/'models'/(prefix+'.dskm')
  if entry.get('animation'):
-  if hashlib.sha256(animation.read_bytes()).hexdigest()!=entry['animation_sha256']:raise ValueError('Menu animation changed: '+prefix)
+  if digest_file(animation)!=entry['animation_sha256']:raise ValueError('Menu animation changed: '+prefix)
   files[animation]=Path('models')/animation.name
 race_items=json.loads((assets/'models/race-items.json').read_text())
 if race_items.get('version')!=1:raise ValueError('Cook current race item/HUD assets before packaging')
@@ -304,7 +323,7 @@ if not audio_manifest.is_file():raise ValueError('Run tools/cook_audio.py before
 audio=json.loads(audio_manifest.read_text())
 sound_source=ROOT/'data/extracted/sound'
 if audio.get('version')!=1 or digest_file(ROOT/audio['source'])!=audio['sourceSha256']:raise ValueError('Sound archive changed: rerun tools/cook_audio.py')
-if hashlib.sha256((ROOT/'build/audio/audio/sound.arc').read_bytes()).hexdigest()!=audio['arcSha256']:raise ValueError('sound.arc does not match its manifest')
+if digest_file(ROOT/'build/audio/audio/sound.arc')!=audio['arcSha256']:raise ValueError('sound.arc does not match its manifest')
 overlay['audio/sound.arc']=ROOT/'build/audio/audio/sound.arc'
 overlay['audio/revo_kart.brsar']=ROOT/audio['source']
 for rel,info in audio['streams'].items():
@@ -318,39 +337,42 @@ overlay['models/bomb_blast.gmdl']=blast
 b=blast.read_bytes();ns,nt=struct.unpack_from('<II',b,16)
 for i in range(nt):
  tex=b[24+ns*44+i*64:24+ns*44+(i+1)*64].split(b'\0')[0].decode();overlay['textures/'+tex+'.t3x']=vfx/(tex+'.t3x')
+# Overlay files replace whatever the shared tree has at the same path: a lookup
+# by path, not a scan of every file per overlay entry (Retro Rewind: ~30,000 files).
+by_rel={}
+for s_,r in files.items():by_rel.setdefault(r.as_posix(),[]).append(s_)
 for rel,src in overlay.items():
- for old in [s for s,r in files.items() if r==Path(rel)]:del files[old]
- files[src]=Path(rel)
+ for old in by_rel.pop(rel,[]):files.pop(old,None)
+ files[src]=Path(rel);by_rel[rel]=[src]
 import sys
 # Indexed archives (tools/pack_menu_assets.py, tools/pack_race_assets.py): the
 # runtime reads packed assets with one open handle; loose files remain as a
 # fallback for anything not packed.
-for archive in ('menu.pak','race.pak'):
+for archive in ('menu.pak','race.pak','race2.pak','race3.pak','race4.pak','race5.pak'):  # race parts: tools/pack_race_assets.py
  if (assets/archive).is_file():files[assets/archive]=Path(archive)
 if '--list' in sys.argv:
  print(json.dumps({rel.as_posix():str(src) for src,rel in files.items()}))
  raise SystemExit(0)
+def pak_names(path):
+ with path.open('rb') as f:
+  head=f.read(12)
+  if head[:4]!=b'MPK1':raise ValueError('Not an MPK1 archive: '+path.name)
+  count,names=struct.unpack_from('<II',head,4);f.seek(12+12*count);blob=f.read(names)
+ return [n.decode() for n in blob.split(b'\0') if n]
+sources={rel.as_posix():src for src,rel in files.items()}
+packed=set()
+for archive in ('menu.pak','race.pak','race2.pak','race3.pak','race4.pak','race5.pak'):  # race parts: tools/pack_race_assets.py
+ if not (assets/archive).is_file():continue
+ made=(assets/archive).stat().st_mtime
+ for name in pak_names(assets/archive):
+  # models/ and textures/ load from the packs (asset loaders, platform/vita/src/ctru_file.cpp): no loose copy.
+  if name.startswith(('models/','textures/')) and name in sources:
+   if Path(sources[name]).stat().st_mtime>made:raise ValueError(f'{archive} is older than {name}: run tools/pack_menu_assets.py / tools/pack_race_assets.py')
+   packed.add(name)
 manifest={}
 for src,rel in files.items():
- dest=out/rel;dest.parent.mkdir(parents=True,exist_ok=True);shutil.copyfile(src,dest);manifest[rel.as_posix()]=hashlib.sha256(dest.read_bytes()).hexdigest()
-# FAT32 allows one folder 65,536 entries, and a long file name takes several:
-# the loose textures folder outgrew it. menu.pak and race.pak already hold every
-# texture and the game reads them first (src/renderer.cpp Texture::load), so a
-# texture inside a pak is not also copied loose. Each one is checked against
-# its pak entry, so a stale pak fails here instead of on the console.
-def pak_entries(path):
- b=path.read_bytes()
- if b[:4]!=b'MPK1':raise ValueError('Not an MPK1 archive: '+path.name)
- count,names=struct.unpack_from('<II',b,4);table=12;blob=12+12*count
- for i in range(count):
-  name_at,offset,size=struct.unpack_from('<III',b,table+i*12)
-  yield b[blob+name_at:b.index(0,blob+name_at)].decode(),b[offset:offset+size]
-for archive in ('menu.pak','race.pak'):
- if not (out/archive).is_file():continue
- for name,data in pak_entries(out/archive):
-  if name.endswith('.t3x') and name in manifest:
-   if hashlib.sha256(data).hexdigest()!=manifest[name]:raise ValueError(f'{archive} is older than {name}: run tools/pack_menu_assets.py / tools/pack_race_assets.py')
-   (out/name).unlink();del manifest[name]
+ if rel.as_posix() in packed:continue
+ dest=out/rel;dest.parent.mkdir(parents=True,exist_ok=True);shutil.copyfile(src,dest);manifest[rel.as_posix()]=digest_file(src)
 controls='''MKW 3DS - native Wii menu asset port, 32 race archives and 10 arena asset sets
 Copy the 3ds folder to the SD card root. Launch mkw-3ds.3dsx with Homebrew Launcher.
 Menu: D-pad / Circle Pad choose, A confirm, B back. A or START skips the opening.

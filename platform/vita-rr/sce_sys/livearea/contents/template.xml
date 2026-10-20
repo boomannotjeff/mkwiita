@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<livearea style="a1" format-ver="01.00" content-rev="6">
+  <livearea-background>
+    <image>bg.png</image>
+  </livearea-background>
+  <!-- Settings, under Start: relaunches the game with -settings (main.cpp launchedForSettings). -->
+  <frame id="frame3">
+    <liveitem>
+      <image>settings.png</image>
+      <target>psla:-settings</target>
+    </liveitem>
+  </frame>
+  <gate>
+    <startup-image>startup.png</startup-image>
+  </gate>
+</livearea>

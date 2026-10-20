@@ -66,6 +66,9 @@ public:
  std::uint32_t residentBytes(const Scene& scene) const;
  // LINEAR a stream sound's block ring takes while it plays (0 for other sounds).
  std::uint32_t streamBytes(std::uint32_t soundId) const;
+ // Streams the BRSTM at path (from the asset root) in place of a stream
+ // sound's own file: a Retro Rewind track's music. nullptr restores it.
+ void overrideStream(std::uint32_t soundId, const char* path);
  bool sceneReady() const;
  // LINEAR bytes the current scene's waves occupy (QA / budget reports).
  std::uint32_t residentWaveBytes() const;

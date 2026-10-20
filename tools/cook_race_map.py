@@ -17,6 +17,7 @@ race-map.json (sources, hashes, per-course statistics) and the generated
 include/mkw/race_map_assets.hpp. The shared sd-card is never written.
 """
 import argparse
+import os
 import concurrent.futures
 import hashlib
 import json
@@ -69,61 +70,32 @@ def digest(path):
 
 
 def courses():
-    text = (ROOT / 'include/mkw/course_catalog.hpp').read_text()
-    rows = re.findall(r'\{"([^"]+)",Kinoko::Course::(\w+),"(Race/Course/([^"]+)\.szs)","models/([^"]+)\.list"', text)
-    return [dict(name=n, id=i, archive=a, key=k, models=m) for n, i, a, k, m in rows]
+    """The race courses in menu order (arenas have no race map). A Retro Rewind
+    track is lit as the retail course it runs as."""
+    from course_catalog import courses as catalog, retail_courses
+    retail = {c['id']: c['archive'] for c in retail_courses()}
+    return [dict(name=c['name'], archive=c['archive'], key=c['key'], models=c['prefix'], lighting=retail[c['run_as']], cooked=c['cooked'])
+            for c in catalog(False) if c['kind'] == 'race']
 
 
-def route_length(kmp):
-    """Lap length along the checkpoint midpoints, in KMP order."""
-    mids = [((r['left'][0] + r['right'][0]) / 2, (r['left'][1] + r['right'][1]) / 2) for r in kmp['CKPT']['records']]
-    return sum(np.hypot(mids[i][0] - mids[i - 1][0], mids[i][1] - mids[i - 1][1]) for i in range(len(mids)))
-
-
-# The detailed view's scale, world units per bottom-screen pixel. Mario Kart 7's
-# map shows its roads 45-70 px wide (docs/BOTTOM_SCREEN.md); Wii roads are about
-# 2,700-4,500 units wide and karts are the same size on every course, so 64 serves
-# every map whose texels allow it. Long courses widen the view instead of
-# magnifying their texture more than about 1.2x.
-UNITS_PER_PIXEL = 64.0
-MAX_UNITS_PER_PIXEL = 110.0
-OVERVIEW = 256
 
 
 def cook_course(index, course, out):
+    """One course's start line (KMP checkpoint 0 cut to its road) for the Vita's
+    corner map. The Vita has no bottom screen: no course map image is rendered."""
     import race_map_bake as rb
     from import_courses import kmp_database
     folder = ROOT / 'assets/courses' / course['key']
     kcl = rb.kcl_triangles(folder / 'course.kcl')
     kmp = kmp_database(folder / 'course.kmp')
     frame, size = rb.course_frame(kmp)
-    image, stats = rb.bake(course['key'], course['models'], course['archive'], frame, size)
-    png = out / 'textures' / f'race_map_{index:02d}.png'
-    image.save(png)
-    subprocess.run([TEX3DS, '-f', 'etc1', '-q', 'high', '-z', 'none', '-o', str(png.with_suffix('.t3x')), str(png)],
-                   check=True, stdout=subprocess.DEVNULL)
-    # The tap-to-toggle overview shows the whole frame: a separately filtered small copy.
-    small = (OVERVIEW, OVERVIEW * size[1] // size[0]) if size[0] >= size[1] else (OVERVIEW * size[0] // size[1], OVERVIEW)
-    overview = out / 'textures' / f'race_map_{index:02d}_overview.png'
-    image.resize(small, Image.Resampling.LANCZOS).save(overview)
-    subprocess.run([TEX3DS, '-f', 'etc1', '-q', 'high', '-z', 'none', '-o', str(overview.with_suffix('.t3x')), str(overview)],
-                   check=True, stdout=subprocess.DEVNULL)
-    texel = (frame[2] - frame[0]) / size[0]
-    view = min(max(UNITS_PER_PIXEL, 0.85 * texel), MAX_UNITS_PER_PIXEL)
-    width = rb.road_width(kcl, route_length(kmp))
-    # The start line: KMP checkpoint 0, cut to the road it crosses.
     start = kmp['CKPT']['records'][0]
     start_left, start_right = rb.road_span(kcl, start['left'], start['right'], kmp['KTPT']['records'][0]['position'])
-    parts = (rb.SD / f"models/{course['models']}.list").read_text().split()
     return {'index': index, 'name': course['name'], 'archive': course['archive'],
-            'texture': f'textures/race_map_{index:02d}.t3x', 'frame': list(frame), 'size': list(size),
-            'roadWidth': width, 'unitsPerPixel': view, 'overview': f'textures/race_map_{index:02d}_overview.t3x', 'overviewSize': list(small),
+            'texture': '', 'frame': list(frame), 'size': list(size), 'unitsPerPixel': 0, 'overview': '', 'overviewSize': [0, 0],
             'startLeft': [float(v) for v in start_left], 'startRight': [float(v) for v in start_right],
-            'startCheckpoint': [list(start['left']), list(start['right'])],
-            't3xBytes': png.with_suffix('.t3x').stat().st_size + overview.with_suffix('.t3x').stat().st_size, 'stats': stats,
-            'sources': {p.relative_to(ROOT).as_posix(): digest(p) for p in
-                        [folder / 'course.kcl', folder / 'course.kmp'] +
-                        [rb.course_path(f'models/{n}.gmdl') for n in parts]}}
+            'startCheckpoint': [list(start['left']), list(start['right'])], 't3xBytes': 0,
+            'sources': {p.relative_to(ROOT).as_posix(): digest(p) for p in [folder / 'course.kcl', folder / 'course.kmp']}}
 
 
 def resize(image, scale_or_size):
@@ -350,7 +322,8 @@ def write_header(manifest, atlas_size, rects, timer, timer_source):
               f'inline constexpr std::array<RaceTimerPane,{len(timer)}> RaceTimerPanes{{{{' +
               ','.join(f'{{{x:.3f}f,{y:.3f}f,{w:.3f}f,{h:.3f}f}}' for _, x, y, w, h in timer) + '}};',
               '}', '']
-    (ROOT / 'include/mkw/race_map_assets.hpp').write_text('\n'.join(lines))
+    from course_catalog import generated
+    generated('race_map_assets.hpp', write=True).write_text('\n'.join(lines))
 
 
 def main():
@@ -369,24 +342,34 @@ def main():
             Image.fromarray(array, 'RGBA').save(MK7_SHIPPED / (marker_key(name) + '.png'))
         return
     (a.output / 'textures').mkdir(parents=True, exist_ok=True)
+    # Course map images from before the Vita dropped the bottom screen.
+    for old in (a.output / 'textures').glob('race_map_*'):
+        old.unlink()
     # Battle arenas follow the 32 races in the runtime catalog, but have no
     # lap checkpoints and are not part of the race-map atlas.
     catalog = courses()
-    if len(catalog) < 32:
-        raise SystemExit(f'Expected at least 32 race courses, found {len(catalog)}')
-    catalog = catalog[:32]
-    wanted = [int(i) for i in a.courses.split(',')] if a.courses else list(range(len(catalog)))
+    wanted = [int(i) for i in a.courses.split(',')] if a.courses else [i for i, c in enumerate(catalog) if c['cooked']]
     manifest_path = a.output / 'race-map.json'
     manifest = json.loads(manifest_path.read_text()) if manifest_path.exists() else {'version': 1, 'courses': []}
     previous = {c['index']: c for c in manifest.get('courses', [])}
     with concurrent.futures.ProcessPoolExecutor(max_workers=a.jobs) as pool:
         jobs = {pool.submit(cook_course, i, catalog[i], a.output): i for i in wanted}
         for job in concurrent.futures.as_completed(jobs):
-            result = job.result()
+            try:
+                result = job.result()
+            except Exception as error:
+                if not os.environ.get('MKW_RR'): raise
+                i = jobs[job]; print(f"{catalog[i]['name']}: start line left out ({str(error)[:120]})", flush=True)
+                catalog[i]['cooked'] = False  # an empty entry, as for tracks not cooked
+                continue
             previous[result['index']] = result
-            print(f"{result['index']:2d} {result['name']:24s} {result['size'][0]}x{result['size'][1]} "
-                  f"{result['unitsPerPixel']:.1f} u/px road {result['roadWidth']:.0f}", flush=True)
-    manifest['courses'] = [previous[i] for i in sorted(previous)]
+            print(f"{result['index']:2d} {result['name']:24s} start line", flush=True)
+    # Retro Rewind tracks that were not cooked are never raced: an empty map.
+    for i, c in enumerate(catalog):
+        if not c['cooked']:
+            previous[i] = {'index': i, 'name': c['name'], 'archive': c['archive'], 'texture': '', 'overview': '', 'frame': [0, 0, 0, 0],
+                           'size': [0, 0], 'overviewSize': [0, 0], 'unitsPerPixel': 0, 'startLeft': [0, 0], 'startRight': [0, 0], 't3xBytes': 0}
+    manifest['courses'] = [previous[i] for i in sorted(previous) if i < len(catalog)]
     if len(manifest['courses']) != len(catalog):
         raise SystemExit('Cook every course before writing the header (missing maps)')
     atlas_size, rects = cook_atlas(a.output, a.mk7_cci, manifest)

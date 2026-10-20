@@ -72,7 +72,7 @@ void MenuMovieAudio::initialize(){
  const Result result=ndspInit();dspState=R_SUCCEEDED(result)?1:-1;
  // A failed DSP bootstrap disables all audio. Keep its result available in
  // release test builds, without logging audio streams or writing per frame.
- if(auto* log=std::fopen("ux0:data/mkw/audio-status.txt","w")){
+ if(auto* log=std::fopen(MKW_DATA_ROOT "/audio-status.txt","w")){
   std::fprintf(log,"ndspInit=0x%08lx\nready=%s\nfirmware=sdmc:/3ds/dspfirm.cdc\n",
       static_cast<unsigned long>(result),dspState>0?"true":"false");
   std::fclose(log);

@@ -23,7 +23,8 @@ from devkitpro import tool
 
 ROOT = Path(__file__).resolve().parents[1]
 ASSETS = ROOT / 'sd-card/3ds/mkw-3ds'
-HEADER = ROOT / 'include/mkw/menu_assets.hpp'
+from course_catalog import generated
+HEADER = generated('menu_assets.hpp')  # the Retro Rewind edition's own copy, once cook_menu_ui.py wrote it
 TEX3DS = str(tool('tex3ds'))
 WORK = ROOT / 'build/menu-textures'
 

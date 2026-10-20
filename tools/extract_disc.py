@@ -5,7 +5,7 @@ Wii partition/FST layout reference: Dolphin DiscIO VolumeWii.cpp and FileSystemG
 Does not download data, modify the disc, or extract executable code.
 """
 import argparse,functools,hashlib,json,struct
-from course_catalog import courses
+from course_catalog import retail_courses
 from pathlib import Path
 from Crypto.Cipher import AES
 U32=lambda b,o=0:struct.unpack_from('>I',b,o)[0]
@@ -87,7 +87,7 @@ def main():
  print(json.dumps(identity))
  if args.list_only:return
  receipt=[]
- course_archives={c["archive"] for c in courses()}
+ course_archives={c["archive"] for c in retail_courses()}  # the disc's own, in either edition
  for f in files:
   n=f['name']
   if args.prefix:

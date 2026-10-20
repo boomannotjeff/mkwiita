@@ -59,6 +59,31 @@ python -m venv .venv
 2. Copy the contents of `build/vita/data/mkw/` to `ux0:data/mkw/`.
 3. Make sure `ur0:data/libshacccg.suprx` exists. If it doesn't, run [ShaRKF00D](https://github.com/Rinnegatamante/ShaRKF00D) once.
 
+## The Retro Rewind edition
+
+The same source builds **MKW Retro Rewind**, a separate app (title ID `MKWR00001`, game files in
+`ux0:data/mkwrr`) made from your disc and your own Retro Rewind 6 install (the `RetroRewind6` folder).
+
+**Build it in its own folder.** Clone or unzip the source a second time. Both editions write to the
+same places in a folder (`data/`, `assets/`, `sd-card/`, `build/`), so a folder remembers which
+edition it built (`build/edition.txt`) and refuses to build the other one.
+
+**Windows:** double-click `Build MKW Retro Rewind Vita.bat` (VPK and game files, needs VitaSDK) or
+`Build Retro Rewind Game Files.bat` (game files only, for `mkw-retro-rewind.vpk` from the releases).
+Each asks for the disc, then the Retro Rewind folder; press Enter there to use Dolphin's
+(`%APPDATA%\Dolphin Emulator\Load\Riivolution\WheelWizard\RetroRewind6` or `...\Riivolution\RetroRewind6`).
+Logs: `build-rr-vita-log.txt` and `build-rr-assets-log.txt`.
+
+**Any OS, from a terminal:**
+
+```sh
+.venv/Scripts/python tools/vita/build.py "Mario Kart Wii (USA).wbfs" --rr "path/to/RetroRewind6"
+```
+
+It makes `build/vita/mkw.vpk` (the Retro Rewind app) and `build/vita/data/mkwrr/`. The first build
+takes a few hours and about 45 GB. Tracks or skins that don't convert are left out and show
+"Not available"; the build log lists them.
+
 ## Build options
 
 | | |
@@ -67,6 +92,8 @@ python -m venv .venv
 | `cmake -G Ninja -B build/vita && cmake --build build/vita` | The VPK only (VITASDK set, sources bootstrapped) |
 | `tools/vita/build.py --assets-only <disc>` | The game files only, no VitaSDK needed (what `Build Game Files.bat` runs) |
 | `tools/vita/build.py --mipmaps --force-cook <disc>` | Experimental: texture mipmaps for the textures that had them on the Wii |
+| `tools/vita/build.py <disc> --rr <RetroRewind6 folder>` | The Retro Rewind edition (see above) |
+| `--rr-cups RT:0` / `--rr-skins mr,lg` | Retro Rewind: cook only some cups (`RT:0`, `RT:0-3,CT:1`) or drivers' skins, for a quick test; the default is `all` |
 
 ## Debug switches
 

@@ -49,9 +49,9 @@ COOK_STEPS=[
  ('course material overlay',['{py}','tools/cook_course_overlay.py','--ids',*COURSE_OVERLAY_IDS,'--objects'],['build/course-materials/models']),
  ('water mipmaps',['{py}','tools/cook_water_mipmaps.py'],['build/water-mipmaps/receipt.json']),
  ('drivers',['{py}','tools/cook_roster.py','{disc}',SD],[SD+'/models/roster.json']),
- ('karts and bikes',['{py}','tools/cook_garage.py','{disc}',SD],[SD+'/models/garage.json']),
+ ('karts and bikes',['{py}','tools/cook_garage.py','{disc}',SD,'--jobs','{jobs}'],[SD+'/models/garage.json']),
  ('full roster',['{py}','tools/cook_full_roster.py','--jobs','{jobs}'],['build/roster']),
- ('race racer lighting',['{py}','tools/cook_racer_lighting.py'],['build/roster/models/garage.json']),
+ ('race racer lighting',['{py}','tools/cook_racer_lighting.py','--jobs','{jobs}'],['build/roster/models/garage.json']),
  ('vehicle shadows',['{py}','tools/cook_vehicle_shadows.py','--jobs','{jobs}'],['build/vehicle-shadows/models/vehicle-shadows.json']),
  ('kart effects',['{py}','tools/cook_effects.py','assets/common/Effect/RKRace.breft',SD+'/textures'],[SD+'/textures/drift-effects.bin']),
  ('bike effects',['{py}','tools/cook_effects.py','assets/common/Effect/RKRace.breft',SD+'/textures','--bike'],[SD+'/textures/drift-effects-bike.bin']),
@@ -86,6 +86,21 @@ COOK_STEPS=[
  ('menu archive',['{py}','tools/pack_menu_assets.py'],[SD+'/menu.pak']),
  ('race archive',['{py}','tools/pack_race_assets.py'],[SD+'/race.pak']),
 ]
+
+# The Retro Rewind edition (tools/vita/build_assets.py --rr sets MKW_RR): its
+# files go over the disc's right after the disc's menus and sound are unpacked.
+# Retail builds keep exactly COOK_STEPS, so their content stamp is unchanged.
+RR_STEPS=[('Retro Rewind files',['{py}','tools/rr_overlay.py'],['data/extracted/rr-catalog.json'])]
+# Retail ships its lighting table; this edition's tracks need their own rows. Only
+# the compile reads them (the start-line bake reads retail rows), so it runs late.
+RR_LIGHTING_STEP=('course lighting table',['{py}','tools/cook_course_lighting.py'],['build/rr-include/mkw/course_lighting.hpp'])
+# Skins cook after the retail roster, before the racer lighting and shadows that refresh every choice.
+RR_SKIN_STEP=('Retro Rewind skins',['{py}','tools/cook_rr_skins.py','--jobs','{jobs}'],['build/rr-include/mkw/garage_skins.hpp'])
+def cook_steps():
+    if not os.environ.get('MKW_RR'):return COOK_STEPS
+    names=[n for n,*_ in COOK_STEPS];at=names.index('menus, movies and sound')+1;roster=names.index('full roster')+1
+    packs=names.index('menu archive')
+    return COOK_STEPS[:at]+RR_STEPS+COOK_STEPS[at:roster]+[RR_SKIN_STEP]+COOK_STEPS[roster:packs]+[RR_LIGHTING_STEP]+COOK_STEPS[packs:]
 
 def log(*a):print('[build_cia]',*a,flush=True)
 
@@ -180,7 +195,7 @@ def _local_module(name):
         f=ROOT/d/(name+'.py')
         if f.is_file():return f
     return None
-def step_fingerprint(cmd):
+def step_fingerprint(cmd,legacy=False):
     commands=cmd if cmd and isinstance(cmd[0],list) else [cmd]
     # Only checked-in sources count: build/export_*.mjs are generated bundles
     # (machine-specific), represented by the tools/*.ts they are built from.
@@ -207,6 +222,8 @@ def step_fingerprint(cmd):
                 if m:queue.append(m)
     if exporters:files|={*(ROOT/'tools').glob('*.ts'),ROOT/'tools/bundle_cooker.mjs'}
     digest=hashlib.sha256(json.dumps(commands).encode())
+    # Retro Rewind stamps written before selection() was kept apart (removable once rebuilt).
+    if legacy:digest.update(os.environ.get('MKW_RR_CUPS','').encode()+os.environ.get('MKW_RR_SKINS','').encode())
     for f in sorted(files,key=lambda f:f.relative_to(ROOT).as_posix()):
         digest.update(f.relative_to(ROOT).as_posix().encode()+b'\0'+f.read_bytes().replace(b'\r\n',b'\n'))
     return digest.hexdigest()
@@ -218,16 +235,31 @@ def step_fingerprint(cmd):
 PACKAGE_SCRIPTS=('tools/package_sd.py','tools/package_standalone.py')
 def content_fingerprint():
     digest=hashlib.sha256()
-    for name,cmd,_ in COOK_STEPS:digest.update(f'{name}\0{step_fingerprint(cmd)}\n'.encode())
+    for name,cmd,_ in cook_steps():digest.update(f'{name}\0{step_fingerprint(cmd)}\n'.encode())
     for script in PACKAGE_SCRIPTS:digest.update((ROOT/script).read_bytes().replace(b'\r\n',b'\n'))
     return digest.hexdigest()[:32]
 
-def stamp_done(stamp,name,fingerprint):
-    if not stamp.is_file():return False
-    text=stamp.read_text().strip()
+# Steps that read the Retro Rewind track or skin choice (--rr-cups, --rr-skins).
+# A new choice re-runs only these (each skips what it already cooked), not
+# every later step: the characters do not depend on the tracks.
+TRACK_STEPS={'Retro Rewind files','course lighting table','race courses and arenas','course objects','course lighting','course material overlay',
+             'effect archives','menu interface','race bottom screen','race minimaps','menu archive','race archive'}
+SKIN_STEPS={'Retro Rewind files','Retro Rewind skins','race racer lighting','vehicle shadows',
+            'menu models','menu archive','race archive'}
+def selection(name):
+    if not os.environ.get('MKW_RR'):return ''
+    return (os.environ.get('MKW_RR_CUPS','') if name in TRACK_STEPS else '')+'|'+(os.environ.get('MKW_RR_SKINS','') if name in SKIN_STEPS else '')
+
+def stamp_state(stamp,fingerprint,chosen,legacy):
+    """(the code matches, the Retro Rewind choice matches) of a step's stamp."""
+    if not stamp.is_file():return False,False
+    lines=stamp.read_text().strip().splitlines()
     # A stamp from before fingerprints (builders before 0.3.5) cannot say what
     # it was cooked from: run the step again rather than mix old and new output.
-    return text.startswith('fingerprint ') and text.split()[1]==fingerprint
+    if not lines or not lines[0].startswith('fingerprint '):return False,False
+    got=lines[0].split()[1]
+    if len(lines)<2 or not lines[1].startswith('selection '):return got==fingerprint or got==legacy,got==legacy or not chosen
+    return got==fingerprint,lines[1][len('selection '):]==chosen
 
 # Names the retail sound archive uses with different case from the disc's own
 # files (issue #18). Case-sensitive file systems (Linux) get a link under the
@@ -243,62 +275,36 @@ def add_case_aliases():
         except OSError:shutil.copyfile(real,alias)
         log(f'linked {alias.name} to {real.name} (case-sensitive file system)')
 
-# Peak memory of one worker in steps that run several at once. The course
-# maps render 1024-2048 px float images: about 0.9 GiB per worker, so a many-
-# core PC with modest RAM ran out with one per core. The worker count is not
-# part of any fingerprint, so this changes no stamp.
-JOB_MEMORY={'race bottom screen':1.25*2**30}
-
-def available_memory():
-    """Free physical memory in bytes, or None when unknown."""
-    try:
-        if sys.platform=='win32':
-            import ctypes
-            class Status(ctypes.Structure):
-                _fields_=[('length',ctypes.c_ulong),('load',ctypes.c_ulong),('total',ctypes.c_ulonglong),('avail',ctypes.c_ulonglong),
-                          ('totalPage',ctypes.c_ulonglong),('availPage',ctypes.c_ulonglong),('totalVirtual',ctypes.c_ulonglong),
-                          ('availVirtual',ctypes.c_ulonglong),('availExtended',ctypes.c_ulonglong)]
-            st=Status();st.length=ctypes.sizeof(Status)
-            return st.avail if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(st)) else None
-        if sys.platform=='darwin':
-            # macOS reclaims cached memory freely: count most of the total.
-            return int(int(subprocess.run(['sysctl','-n','hw.memsize'],capture_output=True,text=True).stdout)*0.6)
-        for line in open('/proc/meminfo'):
-            if line.startswith('MemAvailable:'):return int(line.split()[1])*1024
-    except Exception:pass
-    return None
-
-def step_jobs(name,jobs):
-    per=JOB_MEMORY.get(name);free=available_memory() if per else None
-    if not free:return jobs
-    fit=max(1,int(free*0.8//per))
-    if fit<jobs:log(f'{name}: {fit} at a time ({free/2**30:.1f} GiB free memory)')
-    return min(jobs,fit)
-
 def stage_cook(disc,jobs,force,check=False):
     shared=shared_checkout();stamps=ROOT/'build/release/cook';stamps.mkdir(parents=True,exist_ok=True)
     rerun=force
-    for name,cmd,outputs in COOK_STEPS:
-        stamp=stamps/(name.replace(' ','-')+'.done');fingerprint=step_fingerprint(cmd)
+    steps=cook_steps()
+    for name,cmd,outputs in steps:
+        stamp=stamps/(name.replace(' ','-')+'.done');fingerprint=step_fingerprint(cmd);chosen=selection(name)
         present=bool(outputs) and all((ROOT/o).exists() for o in outputs)
+        code,choice=stamp_state(stamp,fingerprint,chosen,step_fingerprint(cmd,legacy=True) if os.environ.get('MKW_RR') else None)
         # A fresh tree trusts only success stamps (a failed step can leave its
         # outputs half written) and, once a step runs, re-runs every later step.
         # Development trees, cooked by hand, are judged by their outputs; so are
         # the Node packages, which a development tree links from elsewhere.
-        done=(present if shared or name=='Node packages' else stamp_done(stamp,name,fingerprint)) and not rerun
-        if done:log('cooked:',name);continue
+        done=(present if shared or name=='Node packages' else code and choice) and not rerun
+        if done:
+            # Rewrite a Retro Rewind stamp from before selection lines, so a new choice re-runs only its steps.
+            if chosen and not shared and stamp.is_file() and 'selection ' not in stamp.read_text():stamp.write_text(f'fingerprint {fingerprint}\nselection {chosen}\n')
+            log('cooked:',name);continue
         # The course lighting re-cook rewrites files in place: no output of its own.
         if shared and not outputs:log('cooked (development tree, assumed):',name);continue
         if check:raise SystemExit(f"Cook step '{name}' has not run")
         if shared:raise SystemExit(f"Cook step '{name}' is missing, but {', '.join(shared)} link to a shared checkout. Build from a fresh clone.")
-        rerun=True
+        # Changed code re-runs every later step; a new Retro Rewind choice only this one.
+        if not (code and not rerun) or shared or name=='Node packages':rerun=True
         commands=cmd if cmd and isinstance(cmd[0],list) else [cmd]
         if any('{disc}' in c for c in commands) and not disc:raise SystemExit(f"Cook step '{name}' needs the disc image path")
         start=time.monotonic()
-        log(f'step {[n for n,*_ in COOK_STEPS].index(name)+1}/{len(COOK_STEPS)}: {name}')
+        log(f'step {[n for n,*_ in steps].index(name)+1}/{len(steps)}: {name}')
         for c in commands:
-            scrub_appledouble();add_case_aliases();run([str(a).replace('{py}',sys.executable).replace('{disc}',str(disc)).replace('{jobs}',str(step_jobs(name,jobs))) for a in c])
-        stamp.write_text(f'fingerprint {fingerprint}\n{time.monotonic()-start:.0f} s\n')
+            scrub_appledouble();add_case_aliases();run([str(a).replace('{py}',sys.executable).replace('{disc}',str(disc)).replace('{jobs}',str(jobs)) for a in c])
+        stamp.write_text(f'fingerprint {fingerprint}\n'+(f'selection {chosen}\n' if chosen else '')+f'{time.monotonic()-start:.0f} s\n')
         for path in PRUNE_AFTER.get(name,()):shutil.rmtree(ROOT/path,ignore_errors=True)
 
 def stage_compile(jobs):

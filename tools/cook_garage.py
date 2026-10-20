@@ -234,8 +234,11 @@ def main():
 
 def cook_audit(audit, args):
     choices = [choice for choice in audit["choices"] if not args.characters or choice["driverSlug"] in args.characters]
-    with ThreadPoolExecutor(max_workers=max(1, min(args.jobs, 6))) as workers:
-        cooked = list(workers.map(lambda choice: cook_choice(choice, args.output), choices))
+    # Processes, not threads: cooking is Python-bound under the GIL.
+    import functools
+    from concurrent.futures import ProcessPoolExecutor
+    with ProcessPoolExecutor(max_workers=max(1, args.jobs)) as workers:
+        cooked = list(workers.map(functools.partial(cook_choice, output=args.output), choices))
     path = args.output / "models/garage.json"
     if args.characters and path.exists():
         records = {row["prefix"]: row for row in json.loads(path.read_text())["choices"]}

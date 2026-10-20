@@ -53,7 +53,7 @@ def main():
             if folder.exists():shutil.rmtree(folder)
         return record
     try:
-        with ThreadPoolExecutor(max_workers=max(1,min(args.jobs,6))) as workers:
+        with ThreadPoolExecutor(max_workers=max(1,args.jobs)) as workers:
             for driver_index,(slug,name,character,code,size) in enumerate(ROSTER):
                 for slot,(vehicle,vehicle_name,stem) in enumerate(VEHICLES[size]):
                     prefix=f'{slug}_{stem}_'

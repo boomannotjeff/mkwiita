@@ -20,6 +20,10 @@ public:
  struct Racer { std::uint8_t character = 0, vehicle = 0; bool local = false; };
  struct Setup {
   unsigned course = 0;        // retail course id (Kinoko::Course)
+  unsigned music = ~0u;       // retail course whose music plays (default: course)
+  // A Retro Rewind track's own music (asset-root paths), in place of music's streams.
+  const char* musicFile = nullptr;
+  const char* finalLapFile = nullptr;
   unsigned mode = 1;          // RaceConfig game mode: 0 GP, 1 VS, 2 TT, 3 battle
   unsigned lapCount = 3;
   unsigned engineClass = 2;   // 0 50cc, 1 100cc, 2 150cc

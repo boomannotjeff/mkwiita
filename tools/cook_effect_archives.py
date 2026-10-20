@@ -11,7 +11,7 @@ its textures beside them; models/effect-archives.json indexes them. An
 archive larger than one table (255 emitters, 96 textures) is split along its
 emitter references, so a parent and the children it spawns share a table.
 """
-import argparse,hashlib,json,shutil,struct,sys
+import os,argparse,hashlib,json,shutil,struct,sys
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 sys.path[:0]=[str(ROOT/'tools'),str(ROOT/'vendor/gclib')]
@@ -101,6 +101,7 @@ def main():
     if root.exists():shutil.rmtree(root)
     index={'version':1,'archives':[]}
     for key,breff in sources():
+      try:
         br,reft=breff.read_bytes(),breff.with_suffix('.breft').read_bytes()
         idx,tindex=fx.entries(br),fx.entries(reft)
         # Mipmapped textures keep their full-size level (stored first).
@@ -110,8 +111,16 @@ def main():
         records={n:fx.Emitter(br,idx,n) for n in idx}
         output=root/key;output.mkdir(parents=True,exist_ok=True)
         tables=[write_table(br,reft,idx,tindex,order,output,f'{key}_{i}') for i,order in enumerate(groups(records,fx.MAX_EMITTERS,fx.MAX_TEXTURES))]
-        index['archives'].append({'key':key,'source':breff.relative_to(ROOT).as_posix(),'sha256':hashlib.sha256(br).hexdigest(),
-            'folder':f'textures/fx/{key}','mipmapsDropped':mipmapped,'tables':[{**t,'table':f'textures/fx/{key}/{t["table"]}'} for t in tables]})
+      except (ValueError,KeyError,FileNotFoundError) as error:
+        # Retro Rewind tracks' effect archives in another format (older emitter
+        # descriptors): that track goes without them; retail stays strict.
+        if not os.environ.get('MKW_RR'):raise
+        print(f'{key}: effect archive left out ({str(error)[:120]})',flush=True)
+        shutil.rmtree(root/key,ignore_errors=True)
+        continue
+      else:
+          index['archives'].append({'key':key,'source':breff.relative_to(ROOT).as_posix(),'sha256':hashlib.sha256(br).hexdigest(),
+              'folder':f'textures/fx/{key}','mipmapsDropped':mipmapped,'tables':[{**t,'table':f'textures/fx/{key}/{t["table"]}'} for t in tables]})
     (OUT/'models/effect-archives.json').write_text(json.dumps(index,indent=1)+'\n')
     emitters=sum(len(t['emitters']) for a in index['archives'] for t in a['tables'])
     print(f"effect archives: {len(index['archives'])} archives, {sum(len(a['tables']) for a in index['archives'])} tables, {emitters} emitters")

@@ -643,6 +643,7 @@ struct SoundSystem::Impl {
  } cache{*this};
  // ---- streams (opened on the audio thread, pumped by the I/O thread)
  LightLock streamLock; std::vector<IoFeed*> feeds;
+ std::vector<std::pair<std::string, std::string>> streamOverrides; // archive stream path -> file (streamLock)
  // ---- stats
  std::atomic<u32> statFrames{0}; f32 audioMs = 0, audioPeak = 0;
  f32 audioClock = 0, lastGameFrameMs = 0, acc = 0; u32 lastDspFrame = 0;
@@ -801,7 +802,7 @@ struct SoundSystem::Impl {
      const unsigned failures = ++files[next].loadFailures;
      files[next].retryAfter = nowMs() + (failures == 1 ? 250.f : failures == 2 ? 1000.f : 5000.f);
      LightLock_Unlock(&fileLock);
-     if (failures <= 3) if (FILE* log = std::fopen("ux0:data/mkw/audio-load-errors.txt", "a")) {
+     if (failures <= 3) if (FILE* log = std::fopen(MKW_DATA_ROOT "/audio-load-errors.txt", "a")) {
       std::fprintf(log, "bank=%lu attempt=%u linear_free=%lu resident=%lu\n", (unsigned long)next,
                    failures, (unsigned long)linearSpaceFree(), (unsigned long)waveBytes.load());
       std::fclose(log);
@@ -936,7 +937,11 @@ struct SoundSystem::Impl {
  }
  static std::unique_ptr<StreamFeed> openStream(void* ctx, const char* path, u32 startSample) {
   auto* self = static_cast<Impl*>(ctx);
-  char full[256]; std::snprintf(full, sizeof full, "%saudio/%s", self->root.c_str(), path);
+  std::string replacement;
+  LightLock_Lock(&self->streamLock); for (const auto& o : self->streamOverrides) if (o.first == path) replacement = o.second; LightLock_Unlock(&self->streamLock);
+  char full[256];
+  if (!replacement.empty()) std::snprintf(full, sizeof full, "%s%s", self->root.c_str(), replacement.c_str());
+  else std::snprintf(full, sizeof full, "%saudio/%s", self->root.c_str(), path);
   auto* feed = new BrstmFeed();
   feed->path = full; feed->startAt = startSample;
   LightLock_Lock(&self->streamLock); self->feeds.push_back(feed); LightLock_Unlock(&self->streamLock);
@@ -1084,6 +1089,19 @@ u32 SoundSystem::streamBytes(u32 soundId) const {
  // BrstmFeed: Slots blocks per channel; retail streams use 14336-sample (8 KB) ADPCM blocks.
  const SoundEntry* e = impl_ ? impl_->archive.sound(soundId) : nullptr;
  return e && e->type == TypeStrm ? u32(std::max<u16>(e->strmChannels, 1)) * 4u * 8192u : 0;
+}
+void SoundSystem::overrideStream(u32 soundId, const char* path) {
+ if (!impl_) return;
+ auto& s = *impl_;
+ const SoundEntry* e = s.archive.sound(soundId);
+ const FileEntry* f = e ? s.archive.file(e->fileId) : nullptr;
+ if (!f || f->streamPath == InvalidId) return;
+ const std::string from = s.archive.string(f->streamPath);
+ LightLock_Lock(&s.streamLock);
+ auto& o = s.streamOverrides;
+ o.erase(std::remove_if(o.begin(), o.end(), [&](const auto& x) { return x.first == from; }), o.end());
+ if (path) o.emplace_back(from, path);
+ LightLock_Unlock(&s.streamLock);
 }
 u32 SoundSystem::residentBytes(const Scene& sc) const {
  if (!impl_) return 0;

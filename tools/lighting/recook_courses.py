@@ -9,7 +9,7 @@ import receipt (models/courses/NN.json) gets the fresh cooked parts, textures
 and limitations exactly as import_courses.py records them; the catalog and the
 source identities are left as they are.
 """
-import argparse, concurrent.futures, json, os, subprocess, sys
+import argparse, concurrent.futures, hashlib, json, os, subprocess, sys
 from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'tools'))
@@ -26,6 +26,7 @@ def refresh_receipt(course, prefixes):
     """Record the re-cooked visuals in the course's import receipt."""
     path = OUT / f"models/courses/{course['id']:02d}.json"
     receipt = json.loads(path.read_text())
+    receipt['exporter_sha256'] = hashlib.sha256((ROOT / 'build/export_brres.mjs').read_bytes()).hexdigest()
     for prefix in prefixes:
         model_list = f'models/{prefix}.list'
         detail = json.loads((OUT / f'models/{prefix}-receipt.json').read_text())
@@ -36,6 +37,12 @@ def refresh_receipt(course, prefixes):
 
 def recook(course, objects):
     folder = ROOT / 'assets/courses' / course['key']
+    # tools/import_courses.py cooks with these same settings: a course it cooked with
+    # the current exporter needs nothing more (with 316 Retro Rewind tracks, a second full cook).
+    receipt = OUT / f"models/courses/{course['id']:02d}.json"
+    exporter = hashlib.sha256((ROOT / 'build/export_brres.mjs').read_bytes()).hexdigest()
+    if receipt.is_file() and json.loads(receipt.read_text()).get('exporter_sha256') == exporter:
+        return course['id'], []
     if not (folder / 'course_model.brres').is_file():
         raise SystemExit('Missing unpacked course: ' + str(folder))
     cooked = []

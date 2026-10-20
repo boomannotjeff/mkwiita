@@ -7,6 +7,7 @@
 #include <mkw/menu_index.hpp>
 #include <mkw/menu_text_motion.hpp>
 #include <mkw/progress.hpp>
+#include <mkw/garage_skins.hpp>
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -18,7 +19,16 @@ constexpr float XScale=display::MenuScaleX,YScale=display::MenuScaleY;
 // Choices the license has not unlocked yet are drawn dimmed.
 constexpr uint32_t LockedTint=0x505050ffu;
 constexpr const char* CupNames[]={"Mushroom Cup","Flower Cup","Star Cup","Special Cup","Shell Cup","Banana Cup","Leaf Cup","Lightning Cup"};
-constexpr const char* CourseNames[]={"Luigi Circuit","Moo Moo Meadows","Mushroom Gorge","Toad's Factory","Mario Circuit","Coconut Mall","DK Summit","Wario's Gold Mine","Daisy Circuit","Koopa Cape","Maple Treeway","Grumble Volcano","Dry Dry Ruins","Moonview Highway","Bowser's Castle","Rainbow Road","GCN Peach Beach","DS Yoshi Falls","SNES Ghost Valley 2","N64 Mario Raceway","N64 Sherbet Land","GBA Shy Guy Beach","DS Delfino Square","GCN Waluigi Stadium","DS Desert Hills","GBA Bowser Castle 3","N64 DK's Jungle Parkway","GCN Mario Circuit","SNES Mario Circuit 3","DS Peach Gardens","GCN DK Mountain","N64 Bowser's Castle"};
+// Cups and courses by menu index (Courses: the catalog, retail or Retro Rewind).
+const char* courseName(unsigned course){return Courses[std::min(course,RaceCourseCount-1)].name;}
+constexpr bool RetroRewind=RetroRewindEdition;
+#ifdef MKW_RR
+const char* cupName(unsigned cup){return Courses[std::min(cup,RaceCupCount-1)*4].cup;}
+#else
+const char* cupName(unsigned cup){return CupNames[std::min(cup,7u)];}
+#endif
+// The battle cups' OK glow icons follow the race cups' (tools/cook_menu_ui.py).
+constexpr unsigned BattleGlow=RaceCupCount;
 struct Pose {
  float x=0,y=0,sx=1,sy=1,delay=0,parentScaleX=1;
  bool moving=false;UiMotionKind kind=UiMotionKind::Slide;
@@ -58,6 +68,14 @@ Pose child(Pose parent,Pose p){
 Pose motionOnly(const char* name,const char* variant){Pose p=control(name,variant);p.x=p.y=0;p.sx=p.sy=1;return p;}
 Pose numbered(const char* name,unsigned i,const char* prefix="Button"){
  char key[64];std::snprintf(key,sizeof key,"%s%u",prefix,i);return control(name,key,i);
+}
+// A cup button. Retro Rewind places them as Pulsar's PULSelectCup: a 4x2 grid
+// in column order (cup 0 top left, cup 1 below it) between two page arrows.
+Pose cupSlot(const char* name,unsigned i){
+ Pose p=numbered(name,i);
+ char key[16];std::snprintf(key,sizeof key,"Button%u",i);
+ if(RetroRewind)if(const auto* q=uiFindControlPose("PULSelectCup",key)){p.x=q->x;p.y=q->y;p.sx=q->sx;p.sy=q->sy;}
+ return p;
 }
 struct Lookup {
  std::array<unsigned,std::size(UiSprites)> keys{},texts{};
@@ -323,7 +341,8 @@ static void composeMenuImpl(const MenuState& s,const UiRaceView& race,std::vecto
   if(transition&&transition->underlay)base=*transition->underlay;
   else{
    base.page=s.selection.mode==UiMode::GrandPrix?UiPage::Cup:s.selection.mode==UiMode::Battle?UiPage::BattleStage:UiPage::Course;
-   base.cursor=base.page==UiPage::Cup?s.selection.course/4:base.page==UiPage::BattleStage?s.selection.battleStage%5:s.selection.course%4;
+   base.cursor=base.page==UiPage::Cup?s.selection.course/4%8:base.page==UiPage::BattleStage?s.selection.battleStage%5:s.selection.course%4;
+   base.cupPage=s.selection.course/4/8;
   }
   UiTransitionView underlayView;
   underlayView.preload=transition&&transition->preload;
@@ -336,7 +355,7 @@ static void composeMenuImpl(const MenuState& s,const UiRaceView& race,std::vecto
  }
  Composer c(s,q,transition);const unsigned driver=std::min(s.selection.driver,unsigned(UiCharacters.size()-1));
  const bool preload=transition&&transition->preload;
- const unsigned course=std::min(s.selection.course,31u),weight=UiCharacters[driver].weight;
+ const unsigned course=std::min(s.selection.course,RaceCourseCount-1),weight=UiCharacters[driver].weight;
  const char* modes[]={"Grand Prix","Time Trials","VS","Battle"};
  // The first quad is always the background, allowing the original 3D menu
  // scene to be inserted between it and the authored controls.
@@ -391,8 +410,16 @@ static void composeMenuImpl(const MenuState& s,const UiRaceView& race,std::vecto
   c.chrome("Single Player",UiHelpMode[std::min(s.cursor,3u)]);break;
  }
  case UiPage::EngineClass:{
-  const char* names[]={"50cc","100cc","150cc","Mirror"};const char* variants[]={"Button50cc","Button100cc","Button150cc","ButtonMirror"};
-  for(unsigned i=0;i<4;++i){Pose p=control("ClassSelect2",variants[i],i);auto base=c.buttonState("class",i);c.movieButton(base.c_str(),p);c.movie("class_movie_",s.engineClassMovie(i),base.c_str(),"black_base",p);c.movieOverlay(base.c_str(),p);{const auto first=q.size();c.icon("class_",i,base.c_str(),"kinoko_set_p",p);if(i==3&&!progress().mirror())c.dim(first);}char caption[64];std::snprintf(caption,sizeof caption,"%s\n%s",names[i],i==0&&!s.selection.mixedEngineTypes?"Karts Only":i==1&&!s.selection.mixedEngineTypes?"Bikes Only":"Karts and Bikes");c.text(caption,base.c_str(),p);if(s.cursor==i)c.glow("class",p,caption);}
+  // Retro Rewind: 100cc, 150cc, 200cc, Mirror (MenuState::slotClass); 200cc uses 150cc's art.
+  const char* names[]={"50cc","100cc","150cc","Mirror"};const char* rrNames[]={"100cc","150cc","200cc","Mirror"};const char* variants[]={"Button50cc","Button100cc","Button150cc","ButtonMirror"};
+  for(unsigned i=0;i<4;++i){Pose p=control("ClassSelect2",variants[i],i);auto base=c.buttonState("class",i);const unsigned art=MenuState::retailClass(i);
+   c.movieButton(base.c_str(),p);c.movie("class_movie_",s.engineClassMovie(i),base.c_str(),"black_base",p);c.movieOverlay(base.c_str(),p);
+   {const auto first=q.size();c.icon("class_",art,base.c_str(),"kinoko_set_p",p);if(art==3&&!progress().mirror())c.dim(first);}
+   char caption[64];
+   if(RetroRewind)std::snprintf(caption,sizeof caption,"%s\nKarts and Bikes",rrNames[i]);
+   else std::snprintf(caption,sizeof caption,"%s\n%s",names[i],i==0&&!s.selection.mixedEngineTypes?"Karts Only":i==1&&!s.selection.mixedEngineTypes?"Bikes Only":"Karts and Bikes");
+   c.text(caption,base.c_str(),p);if(s.cursor==i)c.glow("class",p,caption);}
+  if(RetroRewind){c.chrome("Engine Classes",UiHelpEngineClassesAllKartBike[MenuState::retailClass(std::min(s.cursor,3u))]);break;}
   {Pose toggle=control("ClassChange","ClassChange");char key[48];
    for(unsigned blink=0;blink<(preload?2u:1u);++blink){const unsigned frame=((s.age/30)+blink)%2;
     std::snprintf(key,sizeof key,"button_switch_shadow_%u",frame);c.namedText(key,"class_switch","close_sha",toggle);
@@ -402,7 +429,12 @@ static void composeMenuImpl(const MenuState& s,const UiRaceView& race,std::vecto
  case UiPage::Character:{
   Pose parent=control("CharacterSelectNULL","CharacterSelectNULL");constexpr unsigned within[]={0,1,4,6,2,3,5,7};
   for(unsigned i=0;i<s.count();++i){char group[48];std::snprintf(group,sizeof group,"CharacterSelect4_%u",i<24?i/8:3);Pose p=child(parent,numbered(group,i<24?within[i%8]:i-24));p.focusSlot=i;c.button("character",i,p);{const auto first=q.size();c.icon("driver_",s.characterDriver(i),c.buttonState("character",i).c_str(),"chara",p);if(!progress().character(s.characterDriver(i)))c.dim(first);}if(s.cursor==i)c.glow("character",p,nullptr,s.characterDriver(i));}
-  Pose name=control("CharacterSelectName","CharacterSelectName");c.panel("character_name",name);c.text(UiCharacters[s.characterDriver(s.cursor)].name,"character_name",name,0xffffffff,"mii_name");c.chrome("Characters");break;
+  Pose name=control("CharacterSelectName","CharacterSelectName");c.panel("character_name",name);c.text(UiCharacters[s.characterDriver(s.cursor)].name,"character_name",name,0xffffffff,"mii_name");
+  // Retro Rewind skins: the chosen one under the name (tools/cook_menu_ui.py bakes the labels).
+  const unsigned driverSkins=s.characterDriver(s.cursor)<GarageSkinCounts.size()?GarageSkinCounts[s.characterDriver(s.cursor)]:0;
+  if(RetroRewind&&driverSkins){char skin[16];if(s.selection.skin)std::snprintf(skin,sizeof skin,"Skin %u",s.selection.skin);else std::snprintf(skin,sizeof skin,"Default");
+   c.label(skin,name.x,-name.y+26,240,24);c.chrome("Characters","L / R: Skin");break;}
+  c.chrome("Characters");break;
  }
  case UiPage::Vehicle:{
   Pose parent=control("MachineSelectNULL6","MachineSelectNULL");
@@ -477,7 +509,9 @@ static void composeMenuImpl(const MenuState& s,const UiRaceView& race,std::vecto
     const Pose p=child(rowPose,control(option,variant));
     const bool on=i==chosen,select=focused&&i==focusOption;
     char panel[32];std::snprintf(panel,sizeof panel,"%s%s",on?"rule_option_on":"rule_option",select?"_select":"_free");
-    c.panel(panel,p);c.text(options[kind][i],panel,p,0xffffffff,on?"active_text":"text");
+    static constexpr const char* rrClasses[]={"100cc","150cc","200cc","Mirror"};
+    const char* label=RetroRewind&&info.row==UiRuleRow::Class?rrClasses[std::min(i,3u)]:options[kind][i];
+    c.panel(panel,p);c.text(label,panel,p,0xffffffff,on?"active_text":"text");
    }
   }
   const auto row=s.ruleRow(focusRow).row;
@@ -487,40 +521,55 @@ static void composeMenuImpl(const MenuState& s,const UiRaceView& race,std::vecto
   c.chrome("Rules",help);break;
  }
  case UiPage::Cup:case UiPage::Course:{
-  bool pickCup=s.page==UiPage::Cup;unsigned selectedCup=pickCup?std::min(s.cursor,7u):course/4;
+  // Eight cup slots per page (cupPage: more than one in the Retro Rewind edition).
+  const bool pickCup=s.page==UiPage::Cup;
+  const unsigned first=(pickCup?s.cupPage:course/4/8)*8,shown=std::min(8u,RaceCupCount-first);
+  const unsigned selectedSlot=pickCup?std::min(s.cursor,shown-1):course/4%8,selectedCup=first+selectedSlot;
   Pose cups=control("CupSelectNULL","CupSelectCupNULL"),courses=control("CupSelectNULL","CupSelectCourseNULL");
   // The chosen cup draws last (retail lifts it to z+200) over its neighbours.
-  for(unsigned n=0;n<8;++n){const unsigned i=n<selectedCup?n:n==7?selectedCup:n+1;
-   Pose p=child(cups,numbered(pickCup?"CupSelectCup":"CourseSelectCup",i));const char* base=i==selectedCup?"cup_select":"cup_free";
+  for(unsigned n=0;n<shown;++n){const unsigned i=n<selectedSlot?n:n==shown-1?selectedSlot:n+1,cup=first+i;
+   Pose p=child(cups,cupSlot(pickCup?"CupSelectCup":"CourseSelectCup",i));const char* base=i==selectedSlot?"cup_select":"cup_free";
    if(!pickCup){
     // CtrlMenuCourseSelectCupSub::calcSelf (USA 807de7d4): t advances 20 per
     // frame to 300. The chosen cup slides to the CupSelectCupNULL origin and
     // grows to 1.5x; the other cups fade out (alpha 300-t, clamped to 255).
     const float t=std::min(300.f,20.f*float(s.age+1));
-    if(i==selectedCup){const float k=t/300.f;p.x+=(cups.x-p.x)*k;p.y+=(cups.y-p.y)*k;p.sx*=1+t/600.f;p.sy*=1+t/600.f;}
+    if(i==selectedSlot){const float k=t/300.f;p.x+=(cups.x-p.x)*k;p.y+=(cups.y-p.y)*k;p.sx*=1+t/600.f;p.sy*=1+t/600.f;}
     else{p.alpha*=std::clamp(300.f-t,0.f,255.f)/255.f;if(p.alpha<=0)continue;}
    }
    c.panel(base,p);
-   {const auto first=q.size();c.icon("cup_",i,base,"icon",p);
-    if(!(s.selection.mode==UiMode::TimeTrials?progress().anyClassCup(i):progress().cup(unsigned(s.selection.engineClass),i)))c.dim(first);}
-   if(i==selectedCup||(pickCup&&uiFocusAnimation(s,i).changing())){
-    c.text(CupNames[i],"cup_select",p);if(pickCup&&i==selectedCup)c.glow("cup",p,CupNames[i],i);
+   {const auto mark=q.size();c.icon("cup_",cup,base,"icon",p);
+    if(!(s.selection.mode==UiMode::TimeTrials?progress().anyClassCup(cup):progress().cup(unsigned(s.selection.engineClass),cup))
+       ||!(Courses[cup*4].supported||Courses[cup*4+1].supported||Courses[cup*4+2].supported||Courses[cup*4+3].supported))c.dim(mark);}
+   // Retro Rewind shows no cup names (its cups have none).
+   if(RetroRewind){if(pickCup&&i==selectedSlot)c.glow("cup",p,nullptr,cup);}
+   else if(i==selectedSlot||(pickCup&&uiFocusAnimation(s,i).changing())){
+    c.text(cupName(cup),"cup_select",p);if(pickCup&&i==selectedSlot)c.glow("cup",p,cupName(cup),cup);
    }
   }
   if(pickCup){
-   Pose movie=child(cups,control("CourseSelectMovie","RaceCupMovie"));
-   c.panel("course_movie_frame",movie);c.movie("cup_movie_",selectedCup,"course_movie_frame","black_base",movie);
+   if(RetroRewind){
+    // No preview movie: the course names over the background, and the page arrows.
+    c.panel("ghost_arrow_left_free",control("CupsArrowL","CupsArrowL"));c.panel("ghost_arrow_right_free",control("CupsArrowR","CupsArrowR"));
+   }else{
+    Pose movie=child(cups,control("CourseSelectMovie","RaceCupMovie"));
+    c.panel("course_movie_frame",movie);c.movie("cup_movie_",selectedCup,"course_movie_frame","black_base",movie);
+   }
    const unsigned highlighted=(unsigned(double(s.age)*59.94/60.0)/120)%4;
    for(unsigned i=0;i<4;++i){Pose p=child(courses,numbered("CupSelectCourse",i,"Course"));
-    c.text(CourseNames[selectedCup*4+i],i==highlighted?"cup_course_select":"cup_course_free",p);
-    if(preload)c.text(CourseNames[selectedCup*4+i],i==highlighted?"cup_course_free":"cup_course_select",p);
+    c.text(courseName(selectedCup*4+i),i==highlighted?"cup_course_select":"cup_course_free",p);
+    if(preload)c.text(courseName(selectedCup*4+i),i==highlighted?"cup_course_free":"cup_course_select",p);
    }
   }else{
    for(unsigned i=0;i<4;++i){Pose p=child(courses,numbered("CourseSelectCourse",i));unsigned ci=selectedCup*4+i;
-    const char* base=s.cursor==i?"course_select":"course_free";c.movieButton(base,p);c.movie("course_preview_",ci,base,"black_base",p);c.movieOverlay(base,p);c.text(CourseNames[ci],base,p);if(s.cursor==i)c.glow("course",p,CourseNames[ci]);
+    const char* base=s.cursor==i?"course_select":"course_free";const auto mark=q.size();c.movieButton(base,p);
+    // Retro Rewind tracks show their course map (tools/cook_menu_ui.py map_N) in place of a movie.
+    if(RetroRewind)c.icon("map_",ci,base,"black_base",p);else c.movie("course_preview_",ci,base,"black_base",p);
+    c.movieOverlay(base,p);c.text(courseName(ci),base,p);if(s.cursor==i)c.glow("course",p,courseName(ci));
+    if(!Courses[ci].supported)c.dim(mark);
    }
   }
-  c.chrome(pickCup?"Cups":"Courses");break;
+  c.chrome(pickCup?"Cups":"Courses",RetroRewind&&pickCup?"L / R: More Cups":"");break;
  }
  case UiPage::BattleCup:case UiPage::BattleStage:{
   const bool pick=s.page==UiPage::BattleCup;const unsigned cup=pick?std::min(s.cursor,1u):std::min(s.selection.battleStage/5,1u);
@@ -531,7 +580,7 @@ static void composeMenuImpl(const MenuState& s,const UiRaceView& race,std::vecto
    const char* base=i==cup?"cup_select":"cup_free";
    c.panel(base,p);c.icon("battle_cup_",i,base,"icon",p);
    if(i==cup||(pick&&uiFocusAnimation(s,i).changing())){
-    c.text(names[i],"cup_select",p);if(pick&&i==cup)c.glow("cup",p,names[i],8+i);
+    c.text(names[i],"cup_select",p);if(pick&&i==cup)c.glow("cup",p,names[i],BattleGlow+i);
    }
   }
   if(pick){
@@ -564,7 +613,7 @@ static void composeMenuImpl(const MenuState& s,const UiRaceView& race,std::vecto
   // The ghost's card (common_w075_ghost_data): course, time, racer and machine.
   const Pose info=control("GhostInfo","TimeAttackGhostList");
   c.panel("ghost_info",info);
-  c.text(CourseNames[std::min(s.selection.course,31u)],"ghost_info",info,0xffffffff,"course_name");
+  c.text(courseName(s.selection.course),"ghost_info",info,0xffffffff,"course_name");
   {const uint32_t ms=s.ghostMilliseconds;char time[16];std::snprintf(time,sizeof time,"%u'%02u\"%03u",unsigned(ms/60000),unsigned(ms/1000%60),unsigned(ms%1000));
    c.chars(time,"ghost_info",info,0xffffffff,"time");}
   const unsigned driver=std::min(s.ghostDriver,25u),weight=UiCharacters[driver].weight;

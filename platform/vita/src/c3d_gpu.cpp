@@ -39,7 +39,7 @@ bool C3D_IVUnifDirty[2][C3D_IVUNIF_COUNT];
 bool C3D_BoolUnifsDirty[2];
 // Newlib heap for the game (Kinoko's arena, menus, sound tables). The GPU
 // pools (LINEAR, textures, render targets) take most of the rest at vglInit.
-unsigned int _newlib_heap_size_user = 128 * 1024 * 1024;
+unsigned int _newlib_heap_size_user = 160 * 1024 * 1024; // incl. Kinoko's 48 MiB (MEMORY_SPACE_SIZE)
 unsigned int sceUserMainThreadStackSize = 1024 * 1024;
 }
 
@@ -850,16 +850,16 @@ void initDisplay() {
 	// The Vita shows no console: printf output (including this layer's
 	// shader and status lines) goes to a log beside the game files.
 	mkdir("ux0:data", 0777);
-	mkdir("ux0:data/mkw", 0777);
-	if (std::freopen("ux0:data/mkw/vita.log", "w", stdout)) std::setvbuf(stdout, nullptr, _IOLBF, 0);
+	mkdir(MKW_DATA_ROOT, 0777);
+	if (std::freopen(MKW_DATA_ROOT "/vita.log", "w", stdout)) std::setvbuf(stdout, nullptr, _IOLBF, 0);
 	initMorton();
 	LightLock_Init(&textureLock);
 	LightLock_Init(&writtenLock);
 	auto marker = [](const char* path) { FILE* f = std::fopen(path, "rb"); if (f) std::fclose(f); return f != nullptr; };
-	gpuTrace = marker("ux0:data/mkw/gpu-trace.txt");
-	gpuSync = marker("ux0:data/mkw/gpu-sync.txt");
-	profile = marker("ux0:data/mkw/profile.txt");
-	if (FILE* f = std::fopen("ux0:data/mkw/quality.txt", "rb")) {
+	gpuTrace = marker(MKW_DATA_ROOT "/gpu-trace.txt");
+	gpuSync = marker(MKW_DATA_ROOT "/gpu-sync.txt");
+	profile = marker(MKW_DATA_ROOT "/profile.txt");
+	if (FILE* f = std::fopen(MKW_DATA_ROOT "/quality.txt", "rb")) {
 		char line[128];
 		float value = 0;
 		while (std::fgets(line, sizeof line, f))

@@ -3,18 +3,47 @@
 Uses original TPL/BRFNT, BRLYT pane trees, BRCTR transforms and BRLAN curves.
 No system fonts or replacement map silhouettes. See the emitted provenance.
 """
-import json, struct, subprocess, re, io, hashlib, math, sys
+import json, os, struct, subprocess, re, io, hashlib, math, sys
 from fractions import Fraction
 from pathlib import Path
 import numpy as np
 from PIL import Image, ImageDraw
 from cook_race_hud import sections,string,layout,animation,sample,font_strings,variant
+from course_catalog import generated
 from cook_race_items import cook_image_sprite,decode_tpl,digest
 from cook_roster import ROOT
 from menu_layout import render_layout,controllers,controller_alphas,controller_animations,messages,message_font_indices,pane_nodes
 from menu_movies import extract_movies,ThpMovie
 OUT=ROOT/'sd-card/3ds/mkw-3ds'
 UI=ROOT/'assets/menu-ui/MenuSingle'
+RR=bool(os.environ.get('MKW_RR'))
+def catalog_races():
+ """Race course names in menu order, and the Retro Rewind cup names ('Retro Cup 1'...)."""
+ text=generated('course_catalog.hpp').read_text(encoding='utf-8')
+ races=int(re.search(r'RaceCourseCount=(\d+)',text)[1])
+ return re.findall(r'\{"([^"]+)"',text)[:races],list(dict.fromkeys(re.findall(r'"(Retro Cup \d+|Custom Cup \d+)"',text)))
+# The game's BMG text colours (1A 08 00 00 01 00 cc cc) Retro Rewind gives its
+# console prefixes. shortcut: only 0x30 (SNES, yellow) is matched to the real
+# game; the others are each console's usual colour until checked in Dolphin.
+RR_TEXT_COLORS={0x02:(210,210,210),0x10:(255,240,0),0x12:(255,190,0),0x13:(255,150,0),0x15:(255,90,0),0x17:(255,30,30),
+                0x20:(170,110,255),0x21:(110,110,255),0x30:(255,230,20),0x31:(40,170,255),0x33:(70,210,70),0x40:(255,70,70)}
+def rr_prefixes():
+ """{course name: (coloured console prefix, RGB)} from the Retro Rewind catalog."""
+ data=json.loads((ROOT/'data/extracted/rr-catalog.json').read_text(encoding='utf-8'))
+ return {t['name']:(t['prefix'],RR_TEXT_COLORS.get(t['color'],(255,255,255))) for p in data['packs'] for c in p['cups'] for t in c['tracks'] if t.get('prefix')}
+def tint_prefix(styled,glyph,style,width,rgb):
+ """The styled label with its first width columns in rgb, as the BMG colour
+ escape draws them: the glyph's light colour replaced, its outline kept."""
+ lo,hi=style['colors'];tinted=np.array(font_style(glyph,[lo,[*rgb,hi[3]]],[[255]*4,[255]*4]))
+ out=np.array(styled);out[:,:width]=tinted[:,:width]
+ return Image.fromarray(out)
+def rr_cup_icons():
+ """Retro Rewind's cup icons (UIAssets icon_NNN.tpl): the Retro cups, then the Custom ones."""
+ from unpack_szs import unpack
+ folder=ROOT/'assets/menu-ui/UIAssets'
+ if not folder.is_dir():unpack(ROOT/'data/extracted/UIAssets.szs',folder)
+ icons={p.stem:p for p in folder.rglob('icon_*.tpl')}
+ return [icons.get(f'icon_{g:03d}') for g in range(len(catalog_races()[1]))]
 # The rules page's race and battle-win counts (UiRaceCounts/UiBattleWins in
 # include/mkw/menu_ui.hpp): each value's "Races: N"/"Wins: N" label is baked.
 UI_RACE_COUNTS=(1,2,3,4,5,6,7,8,16,32)
@@ -277,7 +306,10 @@ def bake_ok_glows(name,resource,drivers,cups,group_name='OK'):
    elif name=='cup' and group_name=='OK':
     entry.update(key='cup_glow_',variant=2)
     replacements=[('cup_glow_'+str(i),UI/'button/timg'/f'tt_cup_icon_{cup}_00.tpl') for i,cup in enumerate(cups)]
-    replacements += [('cup_glow_'+str(8+i),UI/'button/timg'/texture) for i,texture in enumerate(['tt_wii_icon_128.tpl','tt_classic_icon_sphere_128.tpl'])]
+    if RR:replacements=[('cup_glow_'+str(i),icon) for i,icon in enumerate(rr_cup_icons()) if icon]
+    # The battle cups' glows follow the race cups (menu_ui.cpp BattleGlow).
+    first=len(catalog_races()[1]) if RR else 8
+    replacements += [('cup_glow_'+str(first+i),UI/'button/timg'/texture) for i,texture in enumerate(['tt_wii_icon_128.tpl','tt_classic_icon_sphere_128.tpl'])]
    elif name=='vehicle' and group_name=='OK':
     # Retail supplies the generated machine thumbnail to this pane; retain
     # its material mapping for the runtime image instead of baking a dummy.
@@ -453,6 +485,9 @@ def main():
  for i,n in enumerate(drivers):tpl('driver_'+str(i),UI/'button/timg'/f'tt_{n}_64x64.tpl')
  cups=['kinoko','flower','star','oukan','koura','banana','konoha','thunder']
  for i,n in enumerate(cups):tpl('cup_'+str(i),UI/'button/timg'/f'tt_cup_icon_{n}_00.tpl')
+ if RR:
+  for i,icon in enumerate(rr_cup_icons()):
+   if icon:tpl('cup_'+str(i),icon)
  for i,n in enumerate(['tt_wii_icon_128.tpl','tt_classic_icon_sphere_128.tpl']):
   tpl('battle_cup_'+str(i),UI/'button/timg'/n)
  for i,n in enumerate(['1','2','3','m']):tpl('class_'+str(i),UI/'button/timg'/f'tt_class_kinoko_{n}.tpl')
@@ -481,19 +516,23 @@ def main():
  help_text={name:[menu_messages[i] for i in ids] for name,ids in help_ids.items()}
  multiline_specs={menu_messages[i]:.7 for i in range(0x8fd,0x901)}
  multiline_specs.update({menu_messages[i]:.5 for i in range(0xbbe,0xbc4)})
+ # Retro Rewind's 200cc caption, laid out as the engine-class messages above.
+ rr_class=['200cc\nKarts and Bikes'] if RR else []
+ multiline_specs.update({label:.5 for label in rr_class})
  stats_path=UI/'parameter/machine_para.bin';source(stats_path);stats=struct.unpack('>441h',stats_path.read_bytes());driver_stats=[list(stats[i*7:i*7+7]) for i in range(27)]
  vehicle_order=[0,3,6,18,21,24,9,12,15,27,30,33]
  vehicle_stats=[[[*stats[(27+base+weight)*7:(28+base+weight)*7]] for base in vehicle_order] for weight in range(3)]
  # Whole labels keep glyph spacing from the original BRFNT CWDH tables.
  roster=json.loads((OUT/'models/roster.json').read_text());garage=json.loads((OUT/'models/garage.json').read_text())
  courses=json.loads((OUT/'models/course-catalog.json').read_text())['courses']
- course_names=re.findall(r'\{"([^"]+)"', (ROOT/'include/mkw/course_catalog.hpp').read_text())[:32]
+ course_names,rr_cups=catalog_races()
  labels=['Single Player','Multiplayer','Nintendo WFC','Main Menu','Grand Prix','Time Trials','VS','Battle','Not available','Character','Character Select','Vehicle','Machine Select','Drift','Drift Type','Automatic','Manual','Cup','Select Cup','Course','Start Race','Pause','Continue','Restart','Quit','Quit this race?','Yes','No','Results','Race Again','Change Course','Change Character','Main Menu','Press A','A: Select    B: Back','A: Select    B: Cancel','A: Start    B: Back','START: Pause','A: Next    B: Back','Loading...','Race unavailable','Choose another course','Finish','Racing','12 racers','No teams','150cc','A: Accelerate   B: Brake','R: Drift   L: Item','Circle Pad: Steer','D-pad: Trick / Wheelie','Hold down + L: Throw back','A: Confirm    B: Cancel','Manual drift','Automatic drift','VS Race','Course Select','Single race','Mushroom Cup','Flower Cup','Star Cup','Special Cup','Shell Cup','Banana Cup','Leaf Cup','Lightning Cup']
  labels+=['Mario','Luigi','Peach','Yoshi','Baby Mario','Baby Peach','Toad','Koopa Troopa','Wario','Waluigi','Donkey Kong','Bowser']
  labels+=course_names+[c['name'] for c in garage['choices']]+list('0123456789:.-/')
  labels+=[text for values in help_text.values() for text in values]
  labels+=re.findall(r'\"([^\"]+)\"',(ROOT/'include/mkw/menu_ui.hpp').read_text())
  labels+=['Characters','Vehicles','Engine Classes','Cups','Courses','Select License','New','License','License 1','License 2','License 3','License 4','50cc','100cc','150cc','Mirror','Solo Race','Team Race','Balloon Battle','Coin Runners','Wii Stages','Retro Stages','Select Stage','Speed','Weight','Acceleration','Handling','Drift','Off-Road','Mini-Turbo','Karts Only','Bikes Only','Karts and Bikes','Press the A Button','OK','Back','Options','Mario Kart Channel','Grand Prix Race','Time Trial','VS Settings','Battle Settings','Unsupported race configuration','Create a license','Attach the Wii Remote wrist strap.','Press A to continue.','Please use the wrist strap.','A: Select','1 Player','2 Players','3 Players','4 Players','Race This Ghost','Watch the Replay','Solo Time Trials','Player','Players','Booster Seat','Flame Runner','Jet Bubble','Locked','Unlocked!']
+ if RR:labels+=rr_cups+['L / R: More Cups','200cc','L / R: Skin','Default']+[f'Skin {n}' for n in range(1,10)]
  labels=[x for x in dict.fromkeys(labels) if x and not x.startswith('mkw/')]
  # Preserve each source text pane's TEV mapping. Bake only strings used by
  # that control, with identical images sharing the same native texture.
@@ -509,11 +548,11 @@ def main():
  rule_counts=[menu_messages[0xd7b]+str(n) for n in UI_RACE_COUNTS]+[menu_messages[0xd84]+str(n) for n in UI_BATTLE_WINS]
  roles={
   'header_text':['Main Menu','Select License','Characters','Vehicles','Engine Classes','Cups','Courses','Drift','Grand Prix','Time Trials','Single Player','VS','Battle','Stages','Ghosts','Wii Stages','Retro Stages','Select Stage','Start Race','Rules'],
-  'rule_row':rule_rows,'rule_option':rule_options,'rule_option_on':rule_options,'rule_value_text':rule_counts,
-  'footer_help':[v for vv in help_text.values() for v in vv],
+  'rule_row':rule_rows,'rule_option':rule_options+(['200cc'] if RR else []),'rule_option_on':rule_options+(['200cc'] if RR else []),'rule_value_text':rule_counts,
+  'footer_help':[v for vv in help_text.values() for v in vv]+(['L / R: More Cups','L / R: Skin'] if RR else []),
   'main':['Single Player','Multiplayer','Nintendo WFC','Mario Kart Channel'],
   'main_button':['1','Player','1\nPlayer'],'main_multi':['2','3','4','Players','2\nPlayers','3\nPlayers','4\nPlayers'],'main_wifi':['1','2','Player','Players','1\nPlayer','2\nPlayers'],
-  'mode':['Grand Prix','Time Trials','VS','Battle'], 'class':['50cc','100cc','150cc','Mirror']+[menu_messages[i] for i in range(0xbbe,0xbc4)],
+  'mode':['Grand Prix','Time Trials','VS','Battle'], 'class':['50cc','100cc','150cc','Mirror']+[menu_messages[i] for i in range(0xbbe,0xbc4)]+rr_class,
   'class_switch':['Switch'],
   'license':['NEW','New','License','License 1','License 2','License 3','License 4','50cc','100cc','150cc','Mirror'],
   'option':['Settings'],'license_edit':['License Settings'],
@@ -522,7 +561,7 @@ def main():
   'license_top_empty':['NEW']+list(LICENSE_NAME_CHARS),'license_bottom_empty':['NEW']+list(LICENSE_NAME_CHARS),
   'character_name':character_labels,'vehicle_name':vehicle_labels,
   'vehicle_ability':['Speed','Weight','Acceleration','Handling','Drift','Off-Road','Mini-Turbo'],
-  'drift':['Automatic','Manual'],'cup':['Mushroom Cup','Flower Cup','Star Cup','Special Cup','Shell Cup','Banana Cup','Leaf Cup','Lightning Cup','Wii Stages','Retro Stages'], 'character':[], 'vehicle':[],
+  'drift':['Automatic','Manual'],'cup':['Mushroom Cup','Flower Cup','Star Cup','Special Cup','Shell Cup','Banana Cup','Leaf Cup','Lightning Cup','Wii Stages','Retro Stages']+rr_cups, 'character':[], 'vehicle':[],
   'cup_course':course_names,
   'battle_course':battle_labels,
   'ghost':['Race This Ghost','Watch the Replay','Solo Time Trials'],
@@ -566,6 +605,8 @@ def main():
      count=struct.unpack_from('>H',data,at+12)[0];available.update(struct.unpack_from('>H',data,at+14+i*4)[0] for i in range(count))
   supported=[label for label in labels if '\n' not in label and all(ord(c) in available for c in label)]
   glyphs=font_strings(font,supported)
+  prefixes=rr_prefixes() if RR and font_id==0 else {}
+  prefix_width={p:g.width for p,g in font_strings(font,sorted({p for p,_ in prefixes.values()})).items()} if prefixes else {}
   if font_id==0:
    # BMG 0x8fd..0x900 use font-size tag 0x0046 (70 percent); engine-class
    # messages 0xbbe..0xbc3 use 0x0032 (50 percent) after their line feed.
@@ -582,6 +623,9 @@ def main():
    for style_id,required in style_labels.items():
     if label not in required:continue
     style=text_styles[style_id-1];styled=font_style(glyphs[label],style['colors'],style['vertices'])
+    # Retro Rewind's coloured console prefix, on the lit text styles only (not the dark shadows).
+    if label in prefixes and sum(style['colors'][1][:3])>300:
+     prefix,rgb=prefixes[label];styled=tint_prefix(styled,glyphs[label],style,prefix_width.get(prefix,0),rgb)
     pixel_hash=hashlib.sha256(styled.tobytes()).digest();key=f'text_style_{style_id}_{font_id}_{i}'
     if pixel_hash in unique:
      record=dict(unique[pixel_hash]);records[key]=record
@@ -609,13 +653,26 @@ def main():
    save('button_switch'+suffix+'_'+str(i),combined,extension)
  maps=[]
  # Catalog order differs from cup order. Resolve via the runtime archive names.
- archives=re.findall(r'"Race/Course/([^"]+)\.szs"',(ROOT/'include/mkw/course_catalog.hpp').read_text())[:32]
+ archives=re.findall(r'"Race/Course/([^"]+)\.szs"',generated('course_catalog.hpp').read_text(encoding='utf-8'))[:len(course_names)]
+ # Retro Rewind: previews only for the tracks that cooked (the others are not available).
+ supported={a for a,ok in re.findall(r'"Race/Course/([^"]+)\.szs","[^"]*","[^"]*","[^"]*",(true|false)',generated('course_catalog.hpp').read_text(encoding='utf-8')) if ok=='true'}
  for i,archive in enumerate(archives):
-  path=ROOT/'assets/courses'/archive/'map_model.brres';source(path)
+  path=ROOT/'assets/courses'/archive/'map_model.brres'
+  if RR and (archive not in supported or not path.is_file()):continue
   temp=ROOT/'build/menu-maps'/archive;temp.mkdir(parents=True,exist_ok=True)
-  receipt=json.loads(subprocess.check_output(['node',str(ROOT/'build/export_brres.mjs'),str(path),str(temp)],text=True))
+  try:receipt=json.loads(subprocess.check_output(['node',str(ROOT/'build/export_brres.mjs'),str(path),str(temp)],text=True))
+  except subprocess.CalledProcessError:
+   if not RR:raise
+   print(f'{archive}: menu map preview left out',flush=True);continue
+  source(path)
   model=json.loads((temp/'model.json').read_text());nodes={n['name']:n['t'] for m in receipt['nodes'] for n in m['nodes']}
-  ld,ru=nodes['posLD'],nodes['posRU'];xmin,xmax=sorted([ld[0],ru[0]]);zmin,zmax=sorted([ld[2],ru[2]])
+  # Custom-track map models may lack the corner nodes; Retro Rewind frames the mesh below.
+  ld,ru=(nodes.get('posLD',[0,0,0]),nodes.get('posRU',[0,0,0])) if RR else (nodes['posLD'],nodes['posRU']);xmin,xmax=sorted([ld[0],ru[0]]);zmin,zmax=sorted([ld[2],ru[2]])
+  if RR or xmax<=xmin or zmax<=zmin:
+   # Custom-track (Retro Rewind) map models may sit outside posLD/posRU or leave them unset: frame the mesh itself.
+   vs=[v for m in model['models'] for shape in m['shapes'] for v in shape['vertices']]
+   if not vs:print(f'{archive}: menu map preview left out (no geometry)',flush=True);continue
+   xmin,xmax=min(v[0] for v in vs),max(v[0] for v in vs);zmin,zmax=min(v[2] for v in vs),max(v[2] for v in vs)
   size=256;img=Image.new('RGBA',(size,size));draw=ImageDraw.Draw(img)
   # Top-down source mesh projection in the authored map camera rectangle.
   for m in model['models']:
@@ -630,6 +687,8 @@ def main():
  scales=[sample(tracks[('pause_w_fade_n','RLPA',6)],i) for i in range(dur)]
  ctr={};alphas={};qualified_controllers={}
  controller_paths=[p for archive in ['Title','MenuSingle'] for p in sorted((ROOT/'assets/menu-ui'/archive).rglob('*.brctr'))]
+ # Retro Rewind's cup page: Pulsar's 4x2 cup grid and its page arrows (UIAssets, unpacked by rr_cup_icons).
+ if RR:controller_paths+=[ROOT/'assets/menu-ui/UIAssets/button/ctrl'/(n+'.brctr') for n in ('PULSelectCup','CupsArrowL','CupsArrowR')]
  controller_paths += [ROOT/'assets/race-ui/Race/button/ctrl'/(name+'.brctr') for name in ['PauseMenuVS','PauseMenuGrandPrix','PauseMenuTimeAttack','PauseMenuBT']]
  for p in controller_paths:
   if p.name.startswith('._'):continue
@@ -676,11 +735,11 @@ def main():
  lines+=['};','inline constexpr float UiFontCells[2][2]={'+','.join('{'+','.join(str(v)+'.f' for v in cell)+'}' for cell in font_cells)+'};','struct UiMovieInfo {const char* key;unsigned frames;float fps;};','inline constexpr UiMovieInfo UiMovies[]={']
  for movie in movie_records:
   for region in movie['regions']:lines.append('{'+','.join([json.dumps(region['key']),str(movie['frames']),f"{movie['fps']:.8f}f"] )+'},')
- lines+=['};','inline constexpr unsigned UiMovieFrameCount=16;','inline constexpr float UiSelectScale[]={'+','.join(f'{x:.8f}f' for x in scales)+'};','inline constexpr float UiMapBounds[32][4]={']
+ lines+=['};','inline constexpr unsigned UiMovieFrameCount=16;','inline constexpr float UiSelectScale[]={'+','.join(f'{x:.8f}f' for x in scales)+'};','inline constexpr float UiMapBounds[][4]={']
  lines += ['{'+','.join(f'{x:.8f}f' for x in m['bounds'])+'},' for m in maps]
  light_blend=pane_records['press_start']['text_light']['blend']
  if light_blend not in ([1,4,5,3],[1,4,1,3]):raise ValueError('Unsupported PressStart light blend: '+str(light_blend))
- lines+=['};','inline constexpr bool UiPressStartLightAdditive='+str(light_blend[2]==1).lower()+';','}'];(ROOT/'include/mkw/menu_assets.hpp').write_text('\n'.join(lines)+'\n')
+ lines+=['};','inline constexpr bool UiPressStartLightAdditive='+str(light_blend[2]==1).lower()+';','}'];generated('menu_assets.hpp',write=True).write_text('\n'.join(lines)+'\n')
  print(f'Cooked {len(records)} source UI sprites, {len(panel_records)} layout panels, {len(movie_records)} retail movies, 32 source minimaps; {len(evidence)} hashed sources')
  # The runtime textures are fitted to the 3DS screen and LZ11-compressed from
  # these full-resolution PNGs; that pass also rewrites the header's UVs.

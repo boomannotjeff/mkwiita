@@ -16,7 +16,6 @@ sys.path[:0] = [str(ROOT / 'tools'), str(ROOT / 'tools/release')]
 import build_cia
 from devkitpro import tool
 
-OUT = ROOT / 'build/vita/data/mkw'
 
 
 def check_tools():
@@ -34,9 +33,35 @@ def main():
     p.add_argument('--mipmaps', action='store_true',
                    help='experimental: mip chains for the textures that had them on the Wii '
                         '(use --force-cook when switching this on or off)')
+    p.add_argument('--rr', type=Path, help='Retro Rewind folder: the Retro Rewind edition (ux0:data/mkwrr)')
+    p.add_argument('--rr-cups', default='all')
+    p.add_argument('--rr-skins', default='all')
     a = p.parse_args()
-    # The cook steps inherit it (tools/cook_model.py).
+    # The cook steps inherit these (tools/cook_model.py, tools/course_catalog.py).
     os.environ['MKW_MIPMAPS'] = '1' if a.mipmaps else '0'
+    if a.rr:
+        if not (a.rr / 'Binaries/ConfigRT.pul').is_file():
+            raise SystemExit(f'{a.rr} is not a Retro Rewind folder (no Binaries/ConfigRT.pul)')
+        os.environ.update(MKW_RR=str(a.rr.resolve()), MKW_RR_CUPS=a.rr_cups, MKW_RR_SKINS=a.rr_skins)
+    data = 'mkwrr' if a.rr else 'mkw'
+    OUT = ROOT / 'build/vita/data' / data
+    # One folder cooks one edition: the cook's stamps and outputs (data/, assets/,
+    # sd-card/, build/) would otherwise mix the two. Folders from before this
+    # marker: an RR catalog means Retro Rewind, any finished step the retail game.
+    marker = ROOT / 'build/edition.txt'
+    if marker.is_file():
+        edition = marker.read_text().strip()
+    elif (ROOT / 'data/extracted/rr-catalog.json').is_file():
+        edition = 'rr'
+    else:
+        edition = 'retail' if any((ROOT / 'build/release/cook').glob('*.done')) else None
+    wanted = 'rr' if a.rr else 'retail'
+    if edition and edition != wanted:
+        names = {'rr': 'Retro Rewind', 'retail': 'Mario Kart Wii'}
+        raise SystemExit(f'This folder already holds the {names[edition]} build. Build {names[wanted]} '
+                         f'from a separate copy of the source (unzip or clone it into another folder).')
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text(wanted + '\n')
     check_tools()
     build_cia.stage_sources()
     build_cia.stage_disc(a.disc)
@@ -51,7 +76,7 @@ def main():
     files = sum(1 for _ in OUT.rglob('*') if _.is_file())
     size = sum(f.stat().st_size for f in OUT.rglob('*') if f.is_file())
     build_cia.log(f'done: {files} files, {size / 2**20:.0f} MiB in {OUT}')
-    build_cia.log('Copy the contents of that folder to ux0:data/mkw on your Vita.')
+    build_cia.log(f'Copy the contents of that folder to ux0:data/{data} on your Vita.')
 
 
 if __name__ == '__main__':

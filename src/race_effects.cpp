@@ -160,7 +160,7 @@ ef::Effect* RaceEffects::start(int spec,const EffectFrame& frame,uint8_t group){
         constexpr const char* names[]={"rk_itemBox","rk_bananaSmk","rk_miniTurbo","rk_spinHalfL","rk_spinHalfR","rk_spinL","rk_spinR"};
         for(unsigned i=0;i<std::size(names);++i)if(!std::strcmp(name,names[i])&&!(diagnosticMask_&(1u<<i))){
             diagnosticMask_|=1u<<i;
-            if(FILE* log=std::fopen("ux0:data/mkw/effects-state.txt","a")){
+            if(FILE* log=std::fopen(MKW_DATA_ROOT "/effects-state.txt","a")){
                 std::fprintf(log,"create generation=%u root=%s ok=%u particles=%u effects=%lu emitters=%lu managers=%lu\n",generation_,name,e!=nullptr,system_->liveParticles,(unsigned long)system_->effects.used(),(unsigned long)system_->emitters.used(),(unsigned long)system_->managers.used());
                 std::fclose(log);
             }
