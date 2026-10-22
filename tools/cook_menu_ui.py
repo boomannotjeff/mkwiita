@@ -471,16 +471,18 @@ def main():
  tpl('glass_focus',UI/'button/timg/tt_glass_sphere_waku_sono1.tpl')
  tpl('title',ROOT/'assets/menu-ui/Title/title/timg/tt_title_screen_mario2.tpl')
  tpl('logo',ROOT/'assets/menu-ui/Title_U/title/timg/tt_title_screen_title_rogo_r_only.tpl')
+ # Vita: the 16:9 screen shows 806 of the art's 832 columns at its own aspect
+ # (456*424/240); the 3DS's 608-wide 4:3 crop was stretched 32% across it.
  # Original title art spans exactly 832x456 once the title logo pane has
  # settled. Keep the source's two image sizes and edge-to-edge composition.
  title=Image.new('RGBA',(832,456),(255,255,255,255))
  title.alpha_composite(decode_tpl(ROOT/'assets/menu-ui/Title/title/timg/tt_title_screen_mario2.tpl'),(0,140))
  title.alpha_composite(decode_tpl(ROOT/'assets/menu-ui/Title_U/title/timg/tt_title_screen_title_rogo_r_only.tpl'),(0,0))
- save('title_scene',title.crop((112,0,720,456)));panel_records['title_scene']=[-304,-228,304,228]
+ save('title_scene',title.crop((13,0,819,456)));panel_records['title_scene']=[-304,-228,304,228]
  blur=Image.new('RGBA',(832,456),(255,255,255,255))
  for archive,name,y in [('Title','tt_title_screen_mario2_bokeboke.tpl',140),('Title_U','tt_title_screen_title_rogo_bokeboke.tpl',0)]:
   p=ROOT/'assets/menu-ui'/archive/'title/timg'/name;source(p);blur.alpha_composite(decode_tpl(p),(0,y))
- save('title_blur_scene',blur.crop((112,0,720,456)));panel_records['title_blur_scene']=[-304,-228,304,228]
+ save('title_blur_scene',blur.crop((13,0,819,456)));panel_records['title_blur_scene']=[-304,-228,304,228]
  drivers=['mario','luigi','peach','yoshi','baby_mario','baby_peach','kinopio','noko','wario','waluigi','donky','koopa','baby_daisy','baby_luigi','catherine','daisy','didy','karon','hone_koopa','funky','teresa','roseta','kinopico','koopa_jr','mii_suit_a','mii_suit_b']
  for i,n in enumerate(drivers):tpl('driver_'+str(i),UI/'button/timg'/f'tt_{n}_64x64.tpl')
  cups=['kinoko','flower','star','oukan','koura','banana','konoha','thunder']

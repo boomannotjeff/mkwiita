@@ -55,7 +55,8 @@ def import_one(c,force=False):
         if not force and receipt_path.exists():
             old=json.loads(receipt_path.read_text())
             if old.get('status')=='imported' and old.get('archive_sha256')==source_hash and all((OUT/p).exists() for p in old.get('model_lists',[])):
-                return old
+                # Receipts from older builds lack newer catalog fields (run_as): the catalog wins.
+                old.update(c);write(receipt_path,old);return old
         receipt.update(archive_sha256=source_hash,archive_bytes=source.stat().st_size)
         folder=ROOT/'assets/courses'/c['key'];unpack(source,folder)
         receipt['resources']={p.relative_to(folder).as_posix():{'bytes':p.stat().st_size,'sha256':digest(p)} for p in sorted(folder.rglob('*')) if p.is_file() and not p.name.startswith('._')}

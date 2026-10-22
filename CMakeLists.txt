@@ -18,16 +18,18 @@ include("$ENV{VITASDK}/share/vita.cmake" REQUIRED)
 set(MKW_VARIANT "retail" CACHE STRING "Game edition: retail, or rr (Retro Rewind, a separate app)")
 if(MKW_VARIANT STREQUAL "rr")
   set(VITA_APP_NAME "MKW Retro Rewind")
+  set(MKW_VPK "mkw-retro-rewind.vpk")
   set(VITA_TITLEID "MKWR00001")
   set(MKW_DATA_ROOT "ux0:data/mkwrr")
   set(MKW_SCE_SYS ${CMAKE_SOURCE_DIR}/platform/vita-rr/sce_sys)
 else()
   set(VITA_APP_NAME "Mario Kart Wii")
+  set(MKW_VPK "mkw.vpk")
   set(VITA_TITLEID "MKWV00001")
   set(MKW_DATA_ROOT "ux0:data/mkw")
   set(MKW_SCE_SYS ${CMAKE_SOURCE_DIR}/platform/vita/sce_sys)
 endif()
-set(VITA_VERSION "01.00")
+set(VITA_VERSION "01.40")
 option(MKW_RELEASE "No test hooks or runtime log" OFF)
 
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
@@ -118,7 +120,7 @@ target_link_libraries(mkw PRIVATE
 
 vita_create_self(eboot.bin mkw UNSAFE)
 # LiveArea images must be 8-bit indexed PNGs.
-vita_create_vpk(mkw.vpk ${VITA_TITLEID} eboot.bin
+vita_create_vpk(${MKW_VPK} ${VITA_TITLEID} eboot.bin
   VERSION ${VITA_VERSION}
   NAME ${VITA_APP_NAME}
   FILE ${MKW_SCE_SYS} sce_sys)

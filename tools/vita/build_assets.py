@@ -66,6 +66,14 @@ def main():
     build_cia.stage_sources()
     build_cia.stage_disc(a.disc)
     build_cia.check_game_code(a.disc)
+    # Staged files are hard links to the cooked ones (tools/package_sd.py), and cooking
+    # rewrites those in place: drop the old output first rather than leave it half updated.
+    if OUT.is_dir() and any(f.stat().st_nlink > 1 for f in OUT.glob('*.pak')):
+        try:
+            shutil.rmtree(OUT)
+        except PermissionError as e:
+            raise SystemExit(f'{e.filename} is in use. Finish or stop any copy from {OUT} (an FTP upload?), '
+                             'then run the build again.')
     build_cia.stage_cook(a.disc, a.jobs, a.force_cook)
     build_cia.run([sys.executable, 'tools/package_sd.py', '--no-zip'])
     shutil.rmtree(OUT, ignore_errors=True)

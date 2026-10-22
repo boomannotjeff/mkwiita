@@ -101,8 +101,7 @@ bool AwardCeremony::load(const Setup& setup){
     std::snprintf(list,sizeof list,"models/course_%02u_sky.list",stage);
     if(!loadList(list,sky_))sky_.clear();
     stand_=loadModel(setup_.team?"award_v_stand2":"award_v_stand1");shadow_=loadModel("award_shadow");
-    char trophy[32];std::snprintf(trophy,sizeof trophy,"trophy_%s",Trophies[std::min(setup_.cup,7u)]);
-    trophy_=loadModel(trophy);
+    if(!setup_.vs){char trophy[32];std::snprintf(trophy,sizeof trophy,"trophy_%s",Trophies[std::min(setup_.cup,7u)]);trophy_=loadModel(trophy);}
     for(unsigned i=0;i<setup_.count;++i){
         auto& r=racers_[i];
         char path[128];const char* code=awardCode(setup_.character[i],setup_.vehicle[i]);
@@ -150,14 +149,16 @@ bool AwardCeremony::load(const Setup& setup){
     // The standings line: "You got Nth place!" in the top three, else the losing line.
     text(placeText_,setup_.won&&setup_.place>=1&&setup_.place<=3?TextPlace+setup_.place-1:TextBetterLuck);
     text(classText_,TextClass+std::min(setup_.engineClass,3u));
-    text(cupName_,TextCup+std::min(setup_.cup,7u));
-    text(rankLabel_,TextRank);
-    text(gradeText_,TextGrade+grade(setup_.points));
+    if(!setup_.vs){
+        text(cupName_,TextCup+std::min(setup_.cup,7u));
+        text(rankLabel_,TextRank);
+        text(gradeText_,TextGrade+grade(setup_.points));
+    }
     if(setup_.team){text(teamText_,TextTeam+std::min(setup_.winner,1u));text(modeText_,TextMode+std::min(setup_.mode,2u));}
     // Award cup icons: the Special Cup's is the crown (oukan), the Leaf Cup's konoha.
     static const char* cupFiles[8]={"kinoko","flower","star","oukan","koura","banana","konoha","thunder"};
     char path[96];std::snprintf(path,sizeof path,"textures/ui/award/award__tt_cup_icon_%s_00.t3x",cupFiles[std::min(setup_.cup,7u)]);
-    cupIcon_.load(path);
+    if(!setup_.vs)cupIcon_.load(path);
     if(setup_.won||setup_.team)confettiTexture_.load("textures/ui/award/winning_run__tt_block_16x16.t3x");
     return true;
 }
@@ -328,7 +329,8 @@ float AwardCeremony::fade() const{
     const float in=tick_<FadeTicks?1.f-float(tick_)/FadeTicks:0.f;
     const float out=skipping_?float(ending_)/FadeTicks:0.f;
     // A short dip to black at the cut from the drive to the podium.
-    float cut=!driving_&&driveTicks_>0&&podiumTicks_<15?1.f-float(podiumTicks_)/15.f:0.f;
+    // Not in the standings: skipped from the drive, podiumTicks_ stays 0 and this held it black.
+    float cut=!driving_&&!standings_&&driveTicks_>0&&podiumTicks_<15?1.f-float(podiumTicks_)/15.f:0.f;
     // A dip to black into the standings, too.
     if(standings_&&standingsTicks_<15)cut=std::max(cut,1.f-float(standingsTicks_)/15.f);
     return std::clamp(std::max({in,out,cut}),0.f,1.f);

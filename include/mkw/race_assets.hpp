@@ -69,7 +69,7 @@ inline constexpr std::array<RaceSprite,12> HudExtras{{
     {"textures/hud_chase_light.t3x",1.000000000f,1.000000000f,128,128},
 }};
 inline constexpr std::array<const char*,21> ItemModels{{
-    "models/item_0.gmdl","models/item_1.gmdl","models/item_2.gmdl","models/item_3.gmdl",nullptr,nullptr,"models/item_6.gmdl","models/item_7.gmdl",nullptr,"models/item_9.gmdl",nullptr,nullptr,nullptr,"models/item_13.gmdl","models/item_14.gmdl","models/item_15.gmdl",nullptr,nullptr,nullptr,nullptr,nullptr
+    "models/item_0.gmdl","models/item_1.gmdl","models/item_2.gmdl","models/item_3.gmdl",nullptr,nullptr,"models/item_6.gmdl","models/item_7.gmdl",nullptr,"models/item_9.gmdl",nullptr,nullptr,"models/item_12.gmdl","models/item_13.gmdl","models/item_14.gmdl","models/item_15.gmdl",nullptr,nullptr,nullptr,nullptr,nullptr
 }};
 inline constexpr const char* ItemBoxModel="models/item_box.gmdl";
 inline constexpr const char* StartSignalModel="models/start_signal.gmdl";

@@ -4527,7 +4527,7 @@ index 9d706df..4213ce0 100644
      m_timer = 0;
      m_phase = 0;
 diff --git a/source/game/kart/KartCollide.cc b/source/game/kart/KartCollide.cc
-index 5ac1c77..51ce8fe 100644
+index 5ac1c77..1a2375e 100644
 --- a/source/game/kart/KartCollide.cc
 +++ b/source/game/kart/KartCollide.cc
 @@ -1,13 +1,18 @@
@@ -4549,7 +4549,7 @@ index 5ac1c77..51ce8fe 100644
  
  #include <egg/math/BoundBox.hh>
  #include <egg/math/Math.hh>
-@@ -40,6 +45,283 @@ void KartCollide::init() {
+@@ -40,6 +45,294 @@ void KartCollide::init() {
      m_poleAngVelTimer = 0;
      m_poleYaw = 0.0f;
      m_colPerpendicularity = 0.0f;
@@ -4714,6 +4714,17 @@ index 5ac1c77..51ce8fe 100644
 +            } else if (selfMega && !otherMega && otherStatus.offBit(eStatus::Crushed)) {
 +                react(other, self, normal, Action::UNK_13, false);
 +                bump = false;
++            } else {
++                // A racer shrunk by lightning is pressed flat by a full-size one (short press).
++                const bool selfShocked = selfStatus.onBit(eStatus::Shocked);
++                const bool otherShocked = otherStatus.onBit(eStatus::Shocked);
++                if (selfShocked && !otherShocked && selfStatus.offBit(eStatus::Crushed)) {
++                    react(self, other, -normal, Action::UNK_14, false);
++                    bump = false;
++                } else if (otherShocked && !selfShocked && otherStatus.offBit(eStatus::Crushed)) {
++                    react(other, self, normal, Action::UNK_14, false);
++                    bump = false;
++                }
 +            }
 +        }
 +    } else if (otherBullet && !selfStar) {
@@ -4833,7 +4844,7 @@ index 5ac1c77..51ce8fe 100644
  }
  
  /// @addr{0x805730D4}
-@@ -253,6 +535,11 @@ void KartCollide::calcBodyCollision(f32 totalScale, f32 sinkDepth, const EGG::Qu
+@@ -253,6 +546,11 @@ void KartCollide::calcBodyCollision(f32 totalScale, f32 sinkDepth, const EGG::Qu
                  if (colInfo.movingFloorDist > -std::numeric_limits<f32>::min()) {
                      collisionData.bHasRoadVel = true;
                      collisionData.roadVelocity = colInfo.roadVelocity;
@@ -4845,7 +4856,7 @@ index 5ac1c77..51ce8fe 100644
                  }
  
                  processBody(collisionData, hitbox, &colInfo, &maskOut);
-@@ -294,6 +581,8 @@ void KartCollide::calcFloorEffect() {
+@@ -294,6 +592,8 @@ void KartCollide::calcFloorEffect() {
              colDir->findClosestCollisionEntry(&mask, KCL_TYPE_BIT(COL_TYPE_SOLID_OOB));
          }
  
@@ -4854,7 +4865,7 @@ index 5ac1c77..51ce8fe 100644
          activateOob(true, &mask, false, false);
      }
  
-@@ -353,6 +642,16 @@ void KartCollide::calcTriggers(Field::KCLTypeMask *mask, const EGG::Vector3f &po
+@@ -353,6 +653,16 @@ void KartCollide::calcTriggers(Field::KCLTypeMask *mask, const EGG::Vector3f &po
  
  /// @addr{0x8056F510}
  void KartCollide::handleTriggers(Field::KCLTypeMask *mask) {
@@ -4871,7 +4882,7 @@ index 5ac1c77..51ce8fe 100644
      calcFallBoundary(mask, false);
      processCannon(mask);
  
-@@ -389,6 +688,11 @@ void KartCollide::calcFallBoundary(Field::KCLTypeMask *mask, bool shortBoundary)
+@@ -389,6 +699,11 @@ void KartCollide::calcFallBoundary(Field::KCLTypeMask *mask, bool shortBoundary)
      }
  
      if (!safe) {
@@ -4883,7 +4894,7 @@ index 5ac1c77..51ce8fe 100644
          activateOob(false, mask, false, false);
      }
  }
-@@ -415,16 +719,49 @@ void KartCollide::calcBeforeRespawn() {
+@@ -415,16 +730,49 @@ void KartCollide::calcBeforeRespawn() {
  }
  
  /// @addr{0x80573B00}
@@ -4934,7 +4945,7 @@ index 5ac1c77..51ce8fe 100644
      move()->initOob();
  
      m_respawnTimer = RESPAWN_TIME;
-@@ -484,6 +821,10 @@ void KartCollide::calcWheelCollision(u16 /*wheelIdx*/, CollisionGroup *hitboxGro
+@@ -484,6 +832,10 @@ void KartCollide::calcWheelCollision(u16 /*wheelIdx*/, CollisionGroup *hitboxGro
      if (colInfo.movingFloorDist > -std::numeric_limits<f32>::min()) {
          collisionData.bHasRoadVel = true;
          collisionData.roadVelocity = colInfo.roadVelocity;
@@ -4945,7 +4956,7 @@ index 5ac1c77..51ce8fe 100644
      }
  
      processWheel(collisionData, firstHitbox, &colInfo, &kclOut);
-@@ -572,6 +913,11 @@ void KartCollide::calcObjectCollision() {
+@@ -572,6 +924,11 @@ void KartCollide::calcObjectCollision() {
      for (size_t i = 0; i < collisionCount; ++i) {
          Reaction reaction = objectDirector->reaction(i);
          if (reaction != Reaction::None && reaction != Reaction::UNK_7) {
@@ -4957,7 +4968,7 @@ index 5ac1c77..51ce8fe 100644
              size_t handlerIdx = static_cast<std::underlying_type_t<Reaction>>(reaction);
              Action newAction = (this->*s_objectCollisionHandlers[handlerIdx])(i);
  
-@@ -835,11 +1181,21 @@ void KartCollide::applySomeFloorMoment(f32 down, f32 rate, CollisionGroup *hitbo
+@@ -835,11 +1192,21 @@ void KartCollide::applySomeFloorMoment(f32 down, f32 rate, CollisionGroup *hitbo
          return;
      }
  

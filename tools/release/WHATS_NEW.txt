@@ -1,11 +1,11 @@
-Progression: make a license with your name.
-  Each one keeps its own unlocks and times.
-Unlock characters - karts - bikes - cups
-  and Mirror by racing - like on the Wii.
-Want it all now: turn on Unlock Everything
-  in Settings - the button in the LiveArea.
-Settings: presets - resolution - graphics.
-Expert staff ghost times unlock rewards.
-Battle: random teams - thicker map outlines.
-Coin Runners: hits drop coins to grab - coins
-  on the minimap - half the starting coins.
+Blooper now shows up before the ink hits.
+Ink fades faster while you boost.
+Standstill charge: smoke - then sparks.
+Dropped bananas stop instead of sliding.
+Triple shells stay steady in a wheelie.
+Blue Shells now hit you in a wheelie.
+Run over racers shrunk by lightning.
+Explosions fixed: right size and look
+  (GBA Shy Guy Beach - Bowser's Castle).
+Stick up/down tilts the kart in the air.
+Smaller game files - faster builds.

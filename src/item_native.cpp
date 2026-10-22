@@ -111,7 +111,7 @@ ItemRacer snapshot(unsigned i){
     r.afterCannon=status.onBit(S::AfterCannon);
     r.inCannon=status.onBit(S::InCannon);
     r.wallCollision=status.onBit(S::WallCollision,S::Wall3Collision);
-    r.up={pose[0,1],pose[1,1],pose[2,1]};r.scale=nativeVec(k->scale());
+    r.up={pose[0,1],pose[1,1],pose[2,1]};r.scale=nativeVec(k->scale());r.levelUp=nativeVec(k->move()->smoothedUp());
     const auto& stats=k->param()->stats();
     r.itemGeometry={stats.itemUnk170,stats.itemUnk174,stats.itemUnk178,stats.itemUnk17c};
     r.speedRatio=k->move()->speedRatioCapped();r.hop=k->move()->hopPosY();
@@ -121,7 +121,7 @@ ItemRacer snapshot(unsigned i){
     auto bit=[&](unsigned n){return status.onBit(static_cast<S>(n));};
     r.shellAcquireUnavailable=r.shellTargetUnavailable||bit(40)||bit(82)||bit(89);
     r.shellTargetProtected=r.shellAcquireUnavailable||bit(4)||bit(32)||bit(35)||bit(36)||bit(63)||bit(79)||bit(91);
-    r.mushroomBoost=status.onBit(S::MushroomBoost);
+    r.mushroomBoost=status.onBit(S::MushroomBoost);r.boosting=status.onBit(S::Boost);
     r.trickRotating=status.onBit(S::ZipperTrick,S::TrickRot);
     r.damageAction=int8_t(k->action()->currentAction());r.zipperStick=status.onBit(S::ZipperStick);
     // KartAction::start's respawn family, read for item eligibility; the kart applies the

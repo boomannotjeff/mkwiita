@@ -65,13 +65,18 @@ def main():
     header = 12 + 12 * len(names) + len(blob)
     offset = (header + 31) & ~31
     entries, payloads, name_offset = [], [], 0
+    stored = {}
     for n in names:
         data = (ASSETS / n).read_bytes()
-        entries.append((name_offset, offset, len(data)))
+        # Byte-identical files are stored once; their entries share the offset.
+        key = hashlib.sha256(data).digest()
+        if key not in stored:
+            stored[key] = offset
+            padded = data + b'\0' * (((len(data) + 31) & ~31) - len(data))
+            payloads.append(padded)
+            offset += len(padded)
+        entries.append((name_offset, stored[key], len(data)))
         name_offset += len(n.encode()) + 1
-        padded = data + b'\0' * (((len(data) + 31) & ~31) - len(data))
-        payloads.append(padded)
-        offset += len(padded)
     with a.output.open('wb') as out:
         out.write(b'MPK1' + struct.pack('<II', len(names), len(blob)))
         for entry in entries:

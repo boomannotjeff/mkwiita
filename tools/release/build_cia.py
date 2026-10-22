@@ -30,7 +30,11 @@ COURSE_OVERLAY_IDS=['1','5','7','8','10','15','19','27','29','31']
 # Intermediates no later step reads, deleted (fresh trees only) once the
 # named step succeeds: several GB the player's disk never needs at once.
 PRUNE_AFTER={'course material overlay':['build/course-exports','build/object-exports'],
-             'full roster':['assets/garage-parts']}
+             'full roster':['assets/garage-parts'],
+             # Scratch exports each step rebuilds on every run; nothing later reads them.
+             'race racer lighting':['build/racer-lighting-exports'],
+             'vehicle shadows':['build/vehicle-shadow-work'],
+             'menu models':['build/menu-models']}
 
 COOK_STEPS=[
  ('Node packages',['npm.cmd' if os.name=='nt' else 'npm','ci','--no-audit','--no-fund'],['node_modules/.package-lock.json']),
@@ -82,6 +86,11 @@ COOK_STEPS=[
  ('race bottom screen',['{py}','tools/cook_race_map.py','--jobs','{jobs}'],['build/race-map/textures/race_bottom_ui.t3x']),
  # The Vita's experimental Wii-style map (map.txt), from each course's map model.
  ('race minimaps',['{py}','tools/cook_race_minimap.py'],['build/race-map/textures/race_minimap_start.t3x']),
+ # Rosalina's Luma with race materials (the battle copy draws black in races).
+ ('race Luma',['{py}','tools/cook_luma.py'],['sd-card/3ds/mkw-3ds/models/luma.json']),
+ # Fire effect materials the exporter cannot express, patched into the cooked course
+ # objects; after every step that writes them, so a re-cooked object is patched again.
+ ('fire materials',['{py}','tools/cook_fire_materials.py'],['build/fire-materials.json']),
  # The SD build's archives index the finished package, so they come last.
  ('menu archive',['{py}','tools/pack_menu_assets.py'],[SD+'/menu.pak']),
  ('race archive',['{py}','tools/pack_race_assets.py'],[SD+'/race.pak']),

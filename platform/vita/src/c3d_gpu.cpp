@@ -1217,16 +1217,19 @@ void C3D_FrameEnd(u8) {
 		if (stats.lastPresentUs) {
 			stats.frameUs += now - stats.lastPresentUs;
 			const uint64_t frame = now - stats.lastPresentUs;
+#ifndef MKW_RELEASE // each report is a memory card write
 			if (frame > 70000)
 				std::printf("c3dvita: slow frame %.1f ms: %u texture uploads (%u converted while drawing, %.1f ms), %u shader programs (%.1f ms)\n",
 					double(frame) / 1e3, uploadStats.uploads, uploadStats.converted, double(uploadStats.us) / 1e3,
 					c3dvita::programsCreated, double(c3dvita::programUs) / 1e3);
+#endif
 		}
 		uploadStats = {};
 		c3dvita::programsCreated = 0;
 		c3dvita::programUs = 0;
 		stats.lastPresentUs = now;
 		if (++stats.frames == 300) {
+#ifndef MKW_RELEASE
 			std::printf("c3dvita: %.1f fps, %u draws/frame, %u copies/frame (%u KiB), sync wait %.2f ms, draw thread %.2f ms, present %.2f ms\n",
 				stats.frameUs ? 299e6 / double(stats.frameUs) : 0.0, stats.draws / 300, stats.copies / 300,
 				unsigned(stats.copiedBytes / 300 / 1024), double(stats.beginWaitUs) / 300e3, double(stats.workUs) / 300e3,
@@ -1238,6 +1241,7 @@ void C3D_FrameEnd(u8) {
 				std::printf("c3dvita:   gpu tail %.2f ms; per frame: uniforms %.2f, textures %.2f, state %.2f, attributes %.2f, vitaGL draw %.2f ms\n",
 					double(stats.gpuTailUs) / 1e3, double(stats.uniformUs) / 300e3, double(stats.textureUs) / 300e3,
 					double(stats.stateUs) / 300e3, double(stats.attributeUs) / 300e3, double(stats.drawUs) / 300e3);
+#endif
 			const uint64_t keep = stats.lastPresentUs;
 			stats = {};
 			stats.lastPresentUs = keep;

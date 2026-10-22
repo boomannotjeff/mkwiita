@@ -288,8 +288,8 @@ inline constexpr UiSpriteInfo UiSprites[]={
 {"glass_focus","textures/ui_glass_focus.t3x",128.00000000f,128.00000000f,1.00000000f,1.00000000f,"",0,0,65536},
 {"title","textures/ui_title.t3x",832.00000000f,316.00000000f,0.81250000f,0.61718750f,"",0,0,2097152},
 {"logo","textures/ui_logo.t3x",832.00000000f,140.00000000f,0.81250000f,0.54687500f,"",0,0,1048576},
-{"title_scene","textures/ui_title_scene.t3x",608.00000000f,456.00000000f,0.78125000f,0.93750000f,"",0,0,524288},
-{"title_blur_scene","textures/ui_title_blur_scene.t3x",608.00000000f,456.00000000f,0.78125000f,0.93750000f,"",0,0,524288},
+{"title_scene","textures/ui_title_scene.t3x",806.00000000f,456.00000000f,0.78125000f,0.93750000f,"",0,0,524288},
+{"title_blur_scene","textures/ui_title_blur_scene.t3x",806.00000000f,456.00000000f,0.78125000f,0.93750000f,"",0,0,524288},
 {"driver_0","textures/ui_driver_0.t3x",64.00000000f,64.00000000f,0.65625000f,0.71875000f,"",0,0,4096},
 {"driver_1","textures/ui_driver_1.t3x",64.00000000f,64.00000000f,0.65625000f,0.71875000f,"",0,0,4096},
 {"driver_2","textures/ui_driver_2.t3x",64.00000000f,64.00000000f,0.65625000f,0.71875000f,"",0,0,4096},
@@ -17011,7 +17011,7 @@ inline constexpr UiMovieInfo UiMovies[]={
 };
 inline constexpr unsigned UiMovieFrameCount=16;
 inline constexpr float UiSelectScale[]={0.89999998f,0.93333332f,0.96666666f,1.00000000f};
-inline constexpr float UiMapBounds[32][4]={
+inline constexpr float UiMapBounds[][4]={
 {-36000.00000000f,-15000.00000000f,26000.00000000f,66000.00000000f},
 {-42684.39843750f,-69792.36718750f,25156.37695312f,4794.93994141f},
 {-55158.24218750f,-15617.81054688f,34192.54296875f,73831.60937500f},

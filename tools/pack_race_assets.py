@@ -37,14 +37,19 @@ def write_pack(output, names, listing):
     blob = b''.join(n.encode() + b'\0' for n in names)
     header = 12 + 12 * len(names) + len(blob)
     offset = (header + 31) & ~31
-    entries = []
+    entries, stored, unique = [], {}, []
     with output.open('wb') as out:
-        sizes = [Path(listing[n]).stat().st_size for n in names]
         name_offset = 0
-        for n, size in zip(names, sizes):
-            entries.append((name_offset, offset, size))
+        for n in names:
+            data = Path(listing[n]).read_bytes()
+            # Byte-identical files (shared textures, banks) are stored once; entries point at it.
+            key = hashlib.sha256(data).digest()
+            if key not in stored:
+                stored[key] = offset
+                unique.append(n)
+                offset += (len(data) + 31) & ~31
+            entries.append((name_offset, stored[key], len(data)))
             name_offset += len(n.encode()) + 1
-            offset += (size + 31) & ~31
         if offset >= 1 << 31:
             raise SystemExit(f'{output.name} exceeds the 2 GiB seek range')
         out.write(b'MPK1' + struct.pack('<II', len(names), len(blob)))
@@ -52,9 +57,9 @@ def write_pack(output, names, listing):
             out.write(struct.pack('<III', *entry))
         out.write(blob)
         out.write(b'\0' * (((header + 31) & ~31) - header))
-        for n, size in zip(names, sizes):
+        for n in unique:
             data = Path(listing[n]).read_bytes()
-            out.write(data + b'\0' * (((size + 31) & ~31) - size))
+            out.write(data + b'\0' * (((len(data) + 31) & ~31) - len(data)))
 
 
 def main():

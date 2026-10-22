@@ -28,6 +28,7 @@
 #include <mkw/race_items.hpp>
 #include <mkw/star_power.hpp>
 #include <mkw/job_worker.hpp>
+#include <mkw/luma_visual.hpp>
 #include <mkw/render_quality.hpp>
 #include <mkw/racer_visuals.hpp>
 #include <mkw/race_hud.hpp>
@@ -742,7 +743,13 @@ int main() {
         renderer.setDeferred(false);
         renderer.waitForGpu();
         if(menu.page==mkw::UiPage::Pause){
+#ifndef __vita__
+            // 3DS memory: the race's graphics make room for the pause menu. The Vita keeps
+            // them resident, so Continue resumes at once instead of reloading the race.
             if(suspendRaceGraphics)suspendRaceGraphics();
+#else
+            mkw::jobWorker().finishAll(); // no race job runs under the pause menu
+#endif
             std::vector<mkw::UiQuad> paused,confirmation;
             residentQuads(menu,nullptr,paused);
             auto confirm=menu;confirm.enter(mkw::UiPage::QuitConfirm);
@@ -1274,6 +1281,7 @@ int main() {
     std::array<int,16> tailActor;tailActor.fill(-1);
     std::vector<std::unique_ptr<mkw::Model>> track,sky;
     std::unique_ptr<mkw::Model> vehicle,driver,vehicleShadow;
+    std::unique_ptr<mkw::LumaVisual> playerLuma; // Rosalina only
     std::array<std::unique_ptr<mkw::Model>,4> wheels;
     std::array<std::unique_ptr<mkw::Model>,9> accessories;
     std::unique_ptr<mkw::DriverAnimation> bodyAnimation;
@@ -1296,10 +1304,13 @@ int main() {
     };
     auto loadDriver=[&](){
         bodyClock={};accessoryClocks={};
-        driverAnimation.reset();bodyAnimation.reset();vehicle.reset();driver.reset();vehicleShadow.reset();for(auto& w:wheels)w.reset();for(auto& a:accessoryAnimations)a.reset();for(auto& a:accessories)a.reset();
+        driverAnimation.reset();bodyAnimation.reset();vehicle.reset();driver.reset();playerLuma.reset();vehicleShadow.reset();for(auto& w:wheels)w.reset();for(auto& a:accessoryAnimations)a.reset();for(auto& a:accessories)a.reset();
         const char* prefix=replay?"replay_":selectedVehicle().prefix;
         auto part=[&](const char* name){auto model=std::make_unique<mkw::Model>();char path[128];snprintf(path,sizeof path,"models/%s%s.gmdl",prefix,name);if(!model->load(path))model.reset();return model;};
         vehicle=part("body");driver=part("driver");if(!replay)vehicleShadow=part("shadow");
+        if(!replay&&(selectedVehicle().character==unsigned(K::Character::Rosalina)||selectedVehicle().character==unsigned(K::Character::Rosalina_Biker_Outfit))){
+            playerLuma=std::make_unique<mkw::LumaVisual>();if(!playerLuma->load())playerLuma.reset();
+        }
         static const char* wheelNames[]={"tire_fl","tire_fr","tire_rl","tire_rr"};
         bool bike=replay||selectedVehicle().bike;
         for(unsigned i=0;i<(bike?2u:4u);++i)wheels[i]=part(wheelNames[i]);
@@ -1413,7 +1424,7 @@ int main() {
         raceGraphicsSuspended=false;for(auto& m:battleBalloonModels)m.reset();
         opponents.reset();raceHud.reset();lakitu.unload();flowUi.unload();
         driverAnimation.reset();bodyAnimation.reset();for(auto& a:accessoryAnimations)a.reset();
-        for(auto& a:accessories)a.reset();for(auto& w:wheels)w.reset();vehicle.reset();driver.reset();vehicleShadow.reset();
+        for(auto& a:accessories)a.reset();for(auto& w:wheels)w.reset();vehicle.reset();driver.reset();playerLuma.reset();vehicleShadow.reset();
         sky.clear();track.clear();courseObjects.reset();trackCourse=-1;raceResident=false;intro.stop();
         renderer.setRetailLighting(nullptr);raceSound.quit();bottomScreen.unload(renderer);
     };
@@ -1429,7 +1440,7 @@ int main() {
         menuModels.reset(renderer);menuIcons.reset(renderer);menuRenderer.release(renderer);renderer.waitForGpu();
         opponents.reset();driverAnimation.reset();bodyAnimation.reset();
         for(auto& a:accessoryAnimations)a.reset();for(auto& a:accessories)a.reset();for(auto& w:wheels)w.reset();
-        vehicle.reset();driver.reset();vehicleShadow.reset();track.clear();sky.clear();
+        vehicle.reset();driver.reset();playerLuma.reset();vehicleShadow.reset();track.clear();sky.clear();
         courseObjects.suspendGraphics();renderer.setRetailLighting(nullptr);
         raceGraphicsSuspended=true;trackCourse=-1;
     };
@@ -1459,7 +1470,7 @@ int main() {
         // race still frozen. Sound caches, items, native objects and EF stay live.
         opponents.reset();driverAnimation.reset();bodyAnimation.reset();
         for(auto& a:accessoryAnimations)a.reset();for(auto& a:accessories)a.reset();for(auto& w:wheels)w.reset();
-        vehicle.reset();driver.reset();vehicleShadow.reset();track.clear();sky.clear();
+        vehicle.reset();driver.reset();playerLuma.reset();vehicleShadow.reset();track.clear();sky.clear();
         return attempt();
     };
     // Old 3DS draws reduced detail; full-quality.txt keeps every draw for QA.
@@ -1684,11 +1695,14 @@ int main() {
             ceremonySetup.character[p]=unsigned(player.character);ceremonySetup.vehicle[p]=unsigned(player.vehicle);
             if(order[p]==0){ceremonySetup.won=true;ceremonySetup.player=int(p);}
         }
-        // The cup's trophy and rank count toward the license's unlocks.
-        const uint64_t unlockedBefore=mkw::progress().unlockables();
-        mkw::progress().grandPrix(ceremonySetup.engineClass,ceremonySetup.cup,ceremonySetup.place,ceremonySetup.points);
-        announceUnlocks(unlockedBefore);
-        if(!mkw::progress().save())report("save failed");
+        ceremonySetup.vs=menu.selection.mode!=mkw::UiMode::GrandPrix;
+        // The cup's trophy and rank count toward the license's unlocks (a VS set has neither).
+        if(!ceremonySetup.vs){
+            const uint64_t unlockedBefore=mkw::progress().unlockables();
+            mkw::progress().grandPrix(ceremonySetup.engineClass,ceremonySetup.cup,ceremonySetup.place,ceremonySetup.points);
+            announceUnlocks(unlockedBefore);
+            if(!mkw::progress().save())report("save failed");
+        }
         ceremonyQueued=true;
     };
     // Team VS and Battle: the winning team on the flat stand (no drive, no
@@ -1913,7 +1927,9 @@ int main() {
             }
             // Preserve the Wii input lattice used by ghost records.
             int stick=std::clamp(int(std::lround(pad.dx*7.f/156.f)),-7,7);
-            if(garageTest){buttons=1;stick=frames%fixtureFrames<32?-4:4;}
+            // Up/down tilts the kart in the air (KartMove::calcDive).
+            int stickY=std::clamp(int(std::lround(pad.dy*7.f/156.f)),-7,7);
+            if(garageTest){buttons=1;stick=frames%fixtureFrames<32?-4:4;stickY=0;}
             // Mirror: the world is drawn flipped, so left on the stick is right on the track.
             if(fullRace&&mirrorMode){
                 stick=-stick;
@@ -1932,11 +1948,11 @@ int main() {
                 const bool ghostLive=fullRace&&timeTrial&&unsigned(K::System::RaceManager::Instance()->stage())>=1;
                 const mkw::GhostFrame* ghostFrame=ghostLive&&ghostMode?ghostRun.frame(ghostTick):nullptr;
                 const unsigned ghostStepTick=ghostTick;
-                unsigned stepButtons=buttons;int stepStick=stick;auto stepTrick=trick;
-                if(ghostMode==2&&ghostFrame){stepButtons=ghostFrame->buttons;stepStick=ghostFrame->stick;stepTrick=K::System::Trick(ghostFrame->trick);}
+                unsigned stepButtons=buttons;int stepStick=stick,stepStickY=stickY;auto stepTrick=trick;
+                if(ghostMode==2&&ghostFrame){stepButtons=ghostFrame->buttons;stepStick=ghostFrame->stick;stepStickY=ghostFrame->stickY();stepTrick=K::System::Trick(ghostFrame->trick);}
                 // Restore current human input every simulation tick before any
                 // temporary autopilot override, including catch-up frame exits.
-                controller->setInputsRawStick(stepButtons,stepStick+7,7,stepTrick);
+                controller->setInputsRawStick(stepButtons,stepStick+7,stepStickY+7,stepTrick);
                 if(fullRace){
                     // After the goal retail hands the player to its AI
                     // (AIEngine PostRaceDriving, USA 0x80728C28): the CPU
@@ -1967,7 +1983,7 @@ int main() {
                     }
                     // This run's ghost: what the kart was given this tick, until the goal.
                     if(ghostLive&&ghostMode!=2&&!raceGrid.finished())
-                        ghostRecording.frames.push_back({uint8_t(stepButtons),int8_t(stepStick),uint8_t(stepTrick),uint8_t((inputs[0].use?1:0)|(inputs[0].backwards?2:0)|(inputs[0].forwards?4:0))});
+                        ghostRecording.frames.push_back({uint8_t(stepButtons),int8_t(stepStick),uint8_t(stepTrick),uint8_t((inputs[0].use?1:0)|(inputs[0].backwards?2:0)|(inputs[0].forwards?4:0)|mkw::GhostFrame::packStickY(stepStickY))});
                     raceItems->beforeStepNative(inputs.data(),raceGrid.count(),K::System::RaceManager::Instance()->isStageReached(K::System::RaceManager::Stage::Race),raceGrid.bulletNoEndPlayers());
                     for(unsigned i=0;i<raceGrid.count();++i){
                         const auto& h=raceItems->hud(i);const bool held=h.deployed&&h.heldCharges>0;
@@ -2005,7 +2021,7 @@ int main() {
                     raceGrid.beforeStep(raceItems->bulletPlayers());
                     if(ghostMode==1&&raceGrid.count()>1){
                         auto* ghostPad=K::System::KPadDirector::Instance()->hostController(1);
-                        if(ghostFrame)ghostPad->setInputsRawStick(ghostFrame->buttons,unsigned(ghostFrame->stick+7),7,K::System::Trick(ghostFrame->trick));
+                        if(ghostFrame)ghostPad->setInputsRawStick(ghostFrame->buttons,unsigned(ghostFrame->stick+7),unsigned(ghostFrame->stickY()+7),K::System::Trick(ghostFrame->trick));
                         else ghostPad->setInputsRawStick(0,7,7,K::System::Trick::None);
                     }
                     if(ghostLive)++ghostTick;
@@ -2175,7 +2191,7 @@ int main() {
                             // The race has faded to black (RaceResultsFlow::Leaving).
                             sectionFadeIn=true;
                             vsSet.next=results.chosen()==0&&!results.finalRace();battleSet.next=battleMode&&vsSet.next;
-                            if(results.chosen()==0&&results.finalRace()&&menu.selection.mode==mkw::UiMode::GrandPrix&&!battleMode&&!timeTrial)queueCeremony();
+                            if(results.chosen()==0&&results.finalRace()&&!teamVs&&!battleMode&&!timeTrial)queueCeremony(); // GP, and solo VS (ours)
                             else if(results.chosen()==0&&results.finalRace()&&(teamVs||battleMode))queueTeamCeremony();
                             if(menu.page==mkw::UiPage::Results){menu.cursor=unsigned(std::max(0,results.chosen()));nextRaceQueued=menu.input({false,false,false,false,true})==mkw::UiAction::StartRace;}
                         }
@@ -2257,14 +2273,17 @@ int main() {
                     animationPass&=vehicleAnimation.finite();
                     for(unsigned i=0;i<vehicleAnimation.wheelCount();++i)fixtureRolling|=std::fabs(vehicleAnimation.roll(i))>0.02f;
                 }
-                signals.bike=bike;signals.wheelie=kart->status().onBit(K::Kart::eStatus::Wheelie);
+                // WheelieRot outlasts a failed wheelie's restart gap, so a stopped bike holding
+                // Up keeps the wheelie pose instead of popping between it and wait.
+                signals.bike=bike;signals.wheelie=kart->status().onBit(K::Kart::eStatus::WheelieRot);
                 signals.airborne=kart->status().offBit(K::Kart::eStatus::TouchingGround);
                 signals.hopping=kart->status().onBit(K::Kart::eStatus::Hop);
                 signals.steering=kart->inputs()->currentState().stick.x;
                 signals.speed=kart->move()->speed();
                 signals.drift=kart->status().onBit(K::Kart::eStatus::DriftManual,K::Kart::eStatus::DriftAuto);
                 signals.driftDirection=kart->move()->hopStickX();signals.boost=boost>0;signals.trick=inTrick;
-                signals.hit=kart->status().onBit(K::Kart::eStatus::InAction,K::Kart::eStatus::Burnout,K::Kart::eStatus::Shocked);
+                // Shrunk racers drive normally; only the lightning spin (an action) plays the damage pose.
+                signals.hit=kart->status().onBit(K::Kart::eStatus::InAction,K::Kart::eStatus::Burnout);
                 signals.finished=fullRace?raceGrid.finished():K::System::RaceManager::Instance()->stage()==K::System::RaceManager::Stage::FinishGlobal;
                 if(fullRace)signals.finishType=raceGrid.rank()<=1?0:raceGrid.rank()<=5?1:2;
                 signals.accelerating=kart->status().onBit(K::Kart::eStatus::Accelerate);signals.braking=kart->status().onBit(K::Kart::eStatus::Brake);
@@ -2279,7 +2298,9 @@ int main() {
                 clockPart(bodyAnimation.get(),bodyClock,false);
                 for(unsigned i=0;i<accessoryAnimations.size();++i)clockPart(accessoryAnimations[i].get(),accessoryClocks[i],i==0);
                 wasTricking=inTrick;
-                const unsigned driftState=effectsTest?(frames<60?0:frames<120?2:3):unsigned(kart->move()->driftState());
+                // A standstill mini-turbo never enters a drift state: smoke while it charges, blue sparks once charged.
+                const bool ssmt=kart->status().onBit(K::Kart::eStatus::ChargingSSMT);
+                const unsigned driftState=effectsTest?(frames<60?0:frames<120?2:3):ssmt?(kart->move()->ssmtCharged()?2u:1u):unsigned(kart->move()->driftState());
                 driftEffects.step(driftState,left,right,{pose[0,2],pose[1,2],pose[2,2]},bike?1:2,{pose[0,1],pose[1,1],pose[2,1]});
                 if(raceEffects.ready){
                     // Player 0's KartEffect emitters, attached in kart space.
@@ -2312,7 +2333,7 @@ int main() {
                     }
                     wasBoosting=boosting;
                     // Bike wheelie wind trail from the rear wheel.
-                    raceEffects.attach(4,fx.wheelie,kartFrame(left),(bike&&signals.wheelie)||(effectsTest&&frames>=120&&frames<180));
+                    raceEffects.attach(4,fx.wheelie,kartFrame(left),(bike&&kart->status().onBit(K::Kart::eStatus::Wheelie))||(effectsTest&&frames>=120&&frames<180));
                     // Smoke and dust (KartEffect's rk_start*, rk_driftSmoke, rk_dirtSmokeA and
                     // rk_jumpSmoke* emitters), player 0 only. Startup follows the
                     // retail callback/input path; drift/off-road/landing thresholds
@@ -2697,6 +2718,7 @@ int main() {
                     if(!replay)Mtx_Translate(&seated,0,choice.seatY,choice.seatZ,true);
                     drawSkinned(&driverAnimation,*driver,seated);
                 }
+                if(playerLuma){playerLuma->prepare(renderer.viewFrustum(),vehicleAnimation,physicsSteps);playerLuma->draw(renderer);}
                 for(unsigned i=0;i<vehicleAnimation.wheelCount();++i){
                     auto& model=wheels[vehicleAnimation.modelIndex(i)];if(!model)continue;
                     renderer.draw(*model,vehicleAnimation.wheel(i));
@@ -2846,5 +2868,5 @@ int main() {
     }
     finishAutoplay();
     mkw::jobWorker().stop();
-    renderer.waitForGpu();bottomScreen.unload(renderer);opponents.reset();raceHud.reset();lakitu.unload();flowUi.unload();driverAnimation.reset();sparkTexture[0].reset();sparkTexture[1].reset();sparkTexture[2].reset();for(auto& texture:*effectTextures)texture.reset();bodyAnimation.reset();for(auto& a:accessoryAnimations)a.reset();for(auto& a:accessories)a.reset();for(auto& w:wheels)w.reset();vehicle.reset();driver.reset();vehicleShadow.reset();sky.clear();track.clear();courseObjects.reset();menuModels.reset(renderer);menuIcons.reset(renderer);menuRenderer.release();mkw::SoundSystem::instance().stop();mkw::MenuMovieAudio::shutdown();renderer.shutdown();gfxExit();return 0;
+    renderer.waitForGpu();bottomScreen.unload(renderer);opponents.reset();raceHud.reset();lakitu.unload();flowUi.unload();driverAnimation.reset();sparkTexture[0].reset();sparkTexture[1].reset();sparkTexture[2].reset();for(auto& texture:*effectTextures)texture.reset();bodyAnimation.reset();for(auto& a:accessoryAnimations)a.reset();for(auto& a:accessories)a.reset();for(auto& w:wheels)w.reset();vehicle.reset();driver.reset();playerLuma.reset();vehicleShadow.reset();sky.clear();track.clear();courseObjects.reset();menuModels.reset(renderer);menuIcons.reset(renderer);menuRenderer.release();mkw::SoundSystem::instance().stop();mkw::MenuMovieAudio::shutdown();renderer.shutdown();gfxExit();return 0;
 }

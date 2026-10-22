@@ -137,7 +137,14 @@ public:
   x=display::CenterX+x*XScale;y=120+y*YScale;w*=XScale;h*=YScale;
   // Source layouts deliberately bleed beyond the projection; crop their UVs,
   // never squeeze a complete pane into the remaining visible screen space.
-  float l=std::max(x,0.f),t=std::max(y,7.5f),r=std::min(x+w,display::Width),b=std::min(y+h,232.5f);
+  // The 3DS shows 16:9 in 225 of its 240 lines (7.5 above and below); the Vita's
+  // canvas is 16:9 already, so its menus use the full height.
+#ifdef __vita__
+  constexpr float Top=0,Bottom=display::Height;
+#else
+  constexpr float Top=7.5f,Bottom=232.5f;
+#endif
+  float l=std::max(x,0.f),t=std::max(y,Top),r=std::min(x+w,display::Width),b=std::min(y+h,Bottom);
   if(r<=l||b<=t)return;
   out.push_back({i,l,t,r-l,b-t,alpha,tint,false,(l-x)/w,(t-y)/h,(r-x)/w,(b-y)/h});
  }

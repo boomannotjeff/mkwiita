@@ -8,7 +8,7 @@ Steps, each skipped when already done (rerun to resume):
               tex3ds (devkitPro's texture converter, fetched into .toolchain)
   2. sources  pinned Kinoko, citro3d, libctru, noclip, gclib (tools/bootstrap.py)
   3. assets   your disc -> build/vita/data/mkw (tools/vita/build_assets.py, about an hour)
-  4. vpk      the game -> build/vita/mkw.vpk (CMake)
+  4. vpk      the game -> build/vita/mkw.vpk, or mkw-retro-rewind.vpk with --rr (CMake)
 
 --assets-only stops after step 3 and needs no VitaSDK: for a VPK downloaded
 from the releases (Build Game Files.bat).
@@ -124,7 +124,7 @@ def main():
     run(['cmake', '-G', 'Ninja', '-S', '.', '-B', build, '-DCMAKE_BUILD_TYPE=Release', f'-DMKW_RELEASE={"ON" if a.release else "OFF"}',
          f'-DMKW_VARIANT={"rr" if a.rr else "retail"}'])
     run(['cmake', '--build', build])
-    log('done:', build / 'mkw.vpk')
+    log('done:', build / ('mkw-retro-rewind.vpk' if a.rr else 'mkw.vpk'))
     log('Install it with VitaShell, then copy the contents of', build / 'data' / data, f'to ux0:data/{data} on your Vita.')
 
 

@@ -274,7 +274,7 @@ void RaceItems::updateHeldItems(unsigned player,ItemWorldQuery query){
     state.radiusX+=.2f*((racer.itemGeometry[1]+30)*racer.scale.z-state.radiusX);
     state.radiusZ+=.2f*((racer.itemGeometry[0]+30)*racer.scale.x-state.radiusZ);
     state.hop=(state.hop+.4f*racer.hop)*.8f;
-    const Vec3 forward=normalized(racer.forward,{0,0,1}),up=normalized(racer.up,{0,1,0});
+    Vec3 forward,up;heldFrame(racer,forward,up);
     const Vec3 right=normalized(cross(up,forward),{1,0,0});
     const Vec3 center=racer.position+forward*(racer.itemGeometry[3]*racer.scale.z)+up*(racer.itemGeometry[2]*racer.scale.y+prop.terrain*state.scales[0]*racer.scale.y+state.hop-racer.hop);
     for(unsigned slot=0;slot<3;++slot)if(h.heldMask&(1u<<slot)){
@@ -388,12 +388,12 @@ void RaceItems::use(unsigned player,bool backwards){
     switch(kind){
     case ItemKind::Mushroom:case ItemKind::TripleMushroom:
         // RMCU useMushroom 0x8079f1a8 -> KartMove::activateMushroom.
-        karts_->activateMushroom(player);events_.push_back({ItemEffect::Mushroom,uint8_t(player)});h.ink=h.inkDelay=0;++mushroomUses_[player];break;
+        karts_->activateMushroom(player);events_.push_back({ItemEffect::Mushroom,uint8_t(player)});washInk(h);++mushroomUses_[player];break;
     case ItemKind::GoldenMushroom:
         // RMCU useGolden 0x8079f2bc: a 450-frame window of mushrooms every 12 frames.
         // Each use is a new press (no repeat while held).
         if(!h.golden)h.golden=GoldenDuration;
-        karts_->activateMushroom(player);events_.push_back({ItemEffect::Mushroom,uint8_t(player)});h.ink=h.inkDelay=0;++mushroomUses_[player];return;
+        karts_->activateMushroom(player);events_.push_back({ItemEffect::Mushroom,uint8_t(player)});washInk(h);++mushroomUses_[player];return;
     case ItemKind::Star:
         // RMCU useStar 0x807a860c: the kart may refuse (action, Bullet); the item is spent
         // either way. An accepted Star clears Blooper ink (activateStar bit 92).
@@ -494,7 +494,7 @@ void RaceItems::updateHolder(unsigned i){
     auto& h=hud_[i];
     // The tethered Blue Shell leaves on the update after its use and frees the slot.
     if(h.slotLock==ItemKind::BlueShell)h.slotLock=ItemKind::None;
-    tick(h.ink);
+    for(unsigned n=racers_[i].boosting?BlooperBoostWash:1;n--;)tick(h.ink);
     if(racers_[i].unavailable||racers_[i].finished||invincible(i)){h.ink=h.inkDelay=0;inkReadyFrame_[i]=0;}
     else if(h.inkDelay){
         // GessoMgr::Update 807d62fc: the attack on this racer's screen, 148 frames before the ink.

@@ -52,6 +52,7 @@ Vec3 vec(const Kinoko::EGG::Vector3f& v){return {v.x,v.y,v.z};}
 }
 
 void VehicleAnimation::reset(){
+    luma_=false;lumaMotion_.reset();lumaFrame_=0;
     body_=handle_=handleBase_=identity();for(auto& m:wheels_)m=identity();for(auto& m:wheelFrames_)m=identity();
     for(auto& m:accessories_)m=identity();accessorySet_=0;roll_={};travel_={};radii_={};display_={};wheelLocal_={};count_=0;vehicle_=~0u;bike_=false;driveFrame_=15;
     base_=handleSource_=identity();for(auto& m:wheelSources_)m=identity();tirePositions_={};bspRadii_={};kartScale_={1,1,1};steering_=0;wheelMotion_={};dirty_=false;
@@ -80,6 +81,27 @@ void VehicleAnimation::step(Kinoko::Kart::KartObject& kart){
     const auto& bsp=kart.param()->bsp();
     using S=Kinoko::Kart::eStatus;
     const auto& status=kart.status();
+    const auto& scenario=Kinoko::System::RaceConfig::Instance()->raceScenario();
+    const unsigned character=unsigned(scenario.players[kart.param()->playerIdx()].character);
+    luma_=character==unsigned(Kinoko::Character::Rosalina)||character==unsigned(Kinoko::Character::Rosalina_Biker_Outfit);
+    if(luma_){
+        // Inputs as MKW-3DS v0.6.0 feeds TicoModel::Update (src/vehicle_animation.cpp).
+        LumaMotion::Input input;
+        input.position=vec(kart.pos());input.previousPosition=vec(kart.prevPos());input.velocity=vec(kart.velocity());
+        input.right={base_.r[0].x,base_.r[1].x,base_.r[2].x};
+        input.poseUp={base_.r[0].y,base_.r[1].y,base_.r[2].y};
+        input.poseForward={base_.r[0].z,base_.r[1].z,base_.r[2].z};
+        input.bodyUp=vec(kart.bodyUp());input.bodyForward=vec(kart.bodyFront());
+        input.movementUp=vec(kart.move()->smoothedUp());
+        // Retail KartMove +0x74 is the velocity direction, not smoothedForward (+0x80).
+        input.internalVelocityDirection=vec(kart.move()->vel1Dir());
+        input.scaleY=kartScale_.y;input.hopHeight=kart.move()->hopPosY();
+        input.resetPosition=unsigned(Kinoko::System::RaceManager::Instance()->stage())<2||status.onBit(S::InRespawn,S::AfterRespawn);
+        input.overZipper=status.onBit(S::OverZipper);input.inCannon=status.onBit(S::InCannon);
+        lumaMotion_.step(input);
+        // USA 807c54c4: only the frozen rescue on N64 Sherbet Land stops its wait clip.
+        if(!(unsigned(scenario.course)==27&&status.onBit(S::InRespawn,S::AfterRespawn)))++lumaFrame_;
+    }
     const float speed=wheelMotion_.step({
         unsigned(Kinoko::System::RaceManager::Instance()->stage()),
         kart.move()->speed(),kart.state()->startBoostCharge(),display_[2],display_[1],

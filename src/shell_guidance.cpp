@@ -1,5 +1,6 @@
 #include "mkw/race_items.hpp"
 #include "mkw/balloon_battle.hpp"
+#include "mkw/race_item_internal.hpp"
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -185,7 +186,12 @@ void RaceItems::updateShell(ItemActor& a,ItemWorldQuery query){
                     // Do not accelerate back through the owner at close range.
                     Vec3 fromOwner=a.position-racers_[unsigned(a.owner)].position;float ownerDistance=length(fromOwner);
                     if(dot(follow,fromOwner)<0)follow=follow-project(follow,normalized(fromOwner,{}))*std::clamp((ownerDistance-2000.f)/(500.f-2000.f),0.f,1.f);
-                    a.velocity+=follow;a.position+=a.velocity+s.homing;shellTerrain(a,query,false,false,true);
+                    a.velocity+=follow;
+                    // Level with or past its target, a Red must not outrun it: it would end up
+                    // ahead, turn back toward the aim behind the kart and meet it head-on.
+                    const Vec3 ahead=normalized(r.forward,{0,0,1});
+                    if(dot(a.position-r.position,ahead)>-r.radius){const float excess=dot(a.velocity-motion(r),ahead);if(excess>0)a.velocity=a.velocity-ahead*excess;}
+                    a.position+=a.velocity+s.homing;shellTerrain(a,query,false,false,true);
                     if(s.phase==5){float close=r.radius+1.5f*a.radius;if(shellXZ2(a.position-r.position)<close*close)shatter(a);}
                 }
             }
@@ -217,12 +223,17 @@ void RaceItems::updateShell(ItemActor& a,ItemWorldQuery query){
             if(a.target<0||unsigned(a.target)>=count_){a.active=false;return;}
             const auto& r=racers_[a.target];
             if(missing(r))s.targetLive=false;if(s.targetLive)s.lastTarget=r.position;
-            Vec3 up=normalized(r.up,{0,1,0}),right=normalized(cross(up,r.forward),{1,0,0});
+            // The wheelie's pitch must not tip the orbit and dive behind a bike (issue #13).
+            Vec3 forward,up;items::heldFrame(r,forward,up);const Vec3 right=normalized(cross(up,forward),{1,0,0});
             if(s.phase==2||s.phase==3){
                 s.approachSpeed=shellMoveToward(s.approachSpeed,130,8);
                 if(s.phase==3){s.height-=7.5f;s.orbitStep=uint16_t(s.orbitStep+35);s.orbitRadius-=s.orbitAngle<0x8000?4:8;s.orbitAngle+=s.orbitStep;}
                 s.orbitOffset=(right*sinAngle(s.orbitAngle)+up*cosAngle(s.orbitAngle))*s.orbitRadius;
-                Vec3 d=s.lastTarget+up*300+s.orbitOffset-a.position;
+                // The loop is centred ahead of the target and low, so it plays inside the target's
+                // own camera view; centred 300 above the kart (with the drawn height on top) it
+                // passed over the player's camera and only the dive was seen.
+                // shortcut: 600 ahead / 150 up tuned by eye, not retail values; check against WiiCompiled.
+                Vec3 d=s.lastTarget+forward*600+up*150+s.orbitOffset-a.position;
                 bool cannonOrbit=s.phase==3&&r.inCannon&&shellCourse_!=29;
                 Vec3 desired=d*(s.phase==2||cannonOrbit?.5f:.3f);
                 if(s.phase==2&&a.velocity.x*desired.x+a.velocity.z*desired.z<0){
@@ -232,6 +243,9 @@ void RaceItems::updateShell(ItemActor& a,ItemWorldQuery query){
                 desired=shellLimit(desired,cannonOrbit?600.f:s.approachSpeed);
                 float response=s.phase==2?.125f:.5f;if(!s.hasRoute&&a.age<30)response*=float(a.age)/30;
                 a.velocity=lerp(a.velocity,desired,response);a.position+=a.velocity;
+                // The loop rides along with the target: steering alone trails a fast kart,
+                // and the circle then happens behind the camera instead of around the racer.
+                if(s.phase==3&&!cannonOrbit&&s.targetLive)a.position+=motion(r);
                 if(query){auto surface=query(a.previous,a.position,a.terrainRadius);a.position.y+=surface.correction.y;}
                 if(s.phase==2&&shellXZ2(d)<640000)s.pending=3;
                 if(s.phase==3&&s.orbitAngle>=0x11f40)s.pending=4;
@@ -239,6 +253,8 @@ void RaceItems::updateShell(ItemActor& a,ItemWorldQuery query){
                 s.height+=s.phase==4?3:-70;
                 float response=r.inCannon&&shellCourse_!=29?.5f:s.phase==4?s.amplitude:(s.dodge?.25f:.7f);
                 Vec3 destination=s.lastTarget+up*210+Vec3{0,s.height,0};a.velocity=(destination-a.position)*response;a.position+=a.velocity;
+                // The rise also rides along; a Mushroom dodge (and the dive) keep the retail lag.
+                if(s.phase==4&&!s.dodge&&!r.inCannon&&s.targetLive)a.position+=motion(r);
                 // 296f80 moves with the old response, updates it, then
                 // detects a dodge for the next tick (150cc response floor .25).
                 if(s.phase==4){

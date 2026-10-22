@@ -1,6 +1,6 @@
 @echo off
 rem Windows: double-click, then drag your Mario Kart Wii (USA) ISO or WBFS into this window.
-rem Builds the Retro Rewind edition: build\vita\mkw.vpk (MKW Retro Rewind) and build\vita\data\mkwrr.
+rem Builds the Retro Rewind edition: build\vita\mkw-retro-rewind.vpk (MKW Retro Rewind) and build\vita\data\mkwrr.
 rem Use a separate copy of the source from the one that builds the normal edition.
 rem Needs VitaSDK (VITASDK set), Python 3.11+, Node.js LTS and Git; see BUILDING.md.
 setlocal

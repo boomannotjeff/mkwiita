@@ -213,6 +213,11 @@ models+=[safe_name(n,'battle model') for n in [*battle['balloons'].values(),batt
 luma=battle['luma'];model,bank=Path(luma['model']),Path(luma['bank'])
 if model.parent!=Path('models') or bank!=model.with_suffix('.dskm'):raise ValueError('Invalid Luma paths')
 models.append(safe_name(model.stem,'Luma model'));files[assets/bank]=bank
+# The race Luma, cooked with race materials (tools/cook_luma.py).
+if (assets/'models/luma.json').is_file():
+ race_luma=json.loads((assets/'models/luma.json').read_text())
+ if race_luma['path']!='models/luma.gmdl' or race_luma['animation']!='models/luma.dskm':raise ValueError('Invalid race Luma paths')
+ files[assets/'models/luma.json']=Path('models/luma.json');models.append('luma');files[assets/'models/luma.dskm']=Path('models/luma.dskm')
 for key,rows in battle['ui'].items():
  for row in rows:
   relative=Path(row['texture'])
@@ -372,7 +377,11 @@ for archive in ('menu.pak','race.pak','race2.pak','race3.pak','race4.pak','race5
 manifest={}
 for src,rel in files.items():
  if rel.as_posix() in packed:continue
- dest=out/rel;dest.parent.mkdir(parents=True,exist_ok=True);shutil.copyfile(src,dest);manifest[rel.as_posix()]=digest_file(src)
+ dest=out/rel;dest.parent.mkdir(parents=True,exist_ok=True);dest.unlink(missing_ok=True)
+ # A hard link stages ~3 GB without copying (tools/vita/build_assets.py clears linked output before cooking).
+ try:os.link(src,dest)
+ except OSError:shutil.copyfile(src,dest)
+ manifest[rel.as_posix()]=digest_file(src)
 controls='''MKW 3DS - native Wii menu asset port, 32 race archives and 10 arena asset sets
 Copy the 3ds folder to the SD card root. Launch mkw-3ds.3dsx with Homebrew Launcher.
 Menu: D-pad / Circle Pad choose, A confirm, B back. A or START skips the opening.
@@ -400,7 +409,7 @@ All 32 courses and 10 arenas are imported; arena race rules are not implemented.
 Race music, kart sounds, character voices, item sounds and course sound events
 use the original sound archive. Menu sound effects and selection music are present.
 Online play, persistent profiles, the Mii identity path and unsupported race modes
-remain unfinished. Rosalina's separate Luma companion is not yet rendered.
+remain unfinished.
 This expanded roster needs console playtesting; this is not complete Wii parity.
 Original local game assets are packaged privately for this user's device.
 Do not replace only the executable; use the complete package.

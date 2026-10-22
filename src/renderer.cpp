@@ -818,6 +818,10 @@ void Renderer::drawNow(const Model& model,const Vertex* vertices,const C3D_Mtx& 
             }else if(alphaMode==5){
                 C3D_TexEnvColor(alpha,constant);
                 C3D_TexEnvSrc(alpha,C3D_Alpha,GPU_TEXTURE0,GPU_TEXTURE1,GPU_CONSTANT);C3D_TexEnvFunc(alpha,C3D_Alpha,GPU_INTERPOLATE);
+            }else if(alphaMode==7){
+                // 2 x texture alpha: the fire glow planes (tools/cook_fire_materials.py).
+                C3D_TexEnvSrc(alpha,C3D_Alpha,GPU_TEXTURE0);C3D_TexEnvFunc(alpha,C3D_Alpha,GPU_REPLACE);
+                C3D_TexEnvScale(alpha,C3D_Alpha,GPU_TEVSCALE_2);
             }
         }
         if(additiveColor||(o&&(o->flags&SubmeshOverride::Add))){
