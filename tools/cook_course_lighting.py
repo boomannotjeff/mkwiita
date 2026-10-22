@@ -23,7 +23,7 @@ the USA main.dol/StaticR decompilation recorded in docs/COURSE_LIGHTING.md:
 
 Writes include/mkw/course_lighting.hpp and build/course-lighting.json.
 """
-import io, json, math, struct, sys
+import io, json, math, os, struct, sys
 from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'vendor/gclib'))
@@ -133,8 +133,8 @@ def parse_bfg(data):
     return states
 
 
-def course_lighting(source, default_light, default_map):
-    files = archive(source)
+def course_lighting(source, default_light, default_map, own=True):
+    files = archive(source) if own else {}
     light = files.get('posteffect/posteffect.blight') or files.get('./posteffect/posteffect.blight')
     lmap = files.get('posteffect/posteffect.blmap') or files.get('./posteffect/posteffect.blmap')
     fog = files.get('posteffect/posteffect.bfg') or files.get('./posteffect/posteffect.bfg')
@@ -185,18 +185,37 @@ def main():
         if src.name.startswith('._') or src.stem.endswith(('_d', '_Dif')):
             continue
         rows.append((f'Race/Course/{src.name}', course_lighting(src, default_light, default_map)))
-    if len(rows) != 42:
+    # The Retro Rewind edition (tools/rr_overlay.py) adds its tracks beside the 42 retail archives.
+    rr = bool(os.environ.get('MKW_RR'))
+    if len(rows) != 42 and not (rr and len(rows) > 42):
         raise ValueError(f'expected 42 course archives, found {len(rows)}')
-    for name, r in rows:
+    def unsupported(r):
         if len(r['lights']) < LIGHTS or len(r['ambients']) < LIGHTS:
-            raise ValueError('retail courses carry 16 lights and 16 ambients: ' + name)
+            return 'retail courses carry 16 lights and 16 ambients'
         if any(l['type'] != 1 for l in r['lights'] if l['flags'] & 1):
-            raise ValueError('only directional lights are ported: ' + name)
+            return 'only directional lights are ported'
         if len(r['textures']) != 2 or [t['name'] for t in r['textures']] != ['lm_0', 'lm_1']:
-            raise ValueError('expected lm_0 and lm_1: ' + name)
+            return 'expected lm_0 and lm_1'
         if any(t['type'] != 0 or len(t['entries']) > RETAIL_TEXTURE_LIGHTS for t in r['textures']):
-            raise ValueError('unsupported light texture: ' + name)
-    (ROOT / 'include/mkw/course_lighting.hpp').write_text(header(rows))
+            return 'unsupported light texture'
+    from course_catalog import retail_courses
+    retail = {c['archive'] for c in retail_courses()}
+    for i, (name, r) in enumerate(rows):
+        if rr and name not in retail:
+            fogs = [f for f in r['fog'] if 0 <= f['type'] <= 255 and math.isfinite(f['start']) and math.isfinite(f['end'])
+                    and math.isfinite(f['fade']) and 0 <= f['color'][0] <= 255]
+            if len(fogs) != len(r['fog']):
+                print(f'{name}: {len(r["fog"]) - len(fogs)} invalid fog entries dropped')
+                r['fog'] = fogs or course_lighting(None, default_light, default_map, own=False)['fog']
+        problem = unsupported(r)
+        if problem and rr and name not in retail:
+            # A custom track's own lighting the port cannot draw: Common's default lightset.
+            print(f'{name}: {problem}, default lighting')
+            rows[i] = (name, course_lighting(None, default_light, default_map, own=False))
+        elif problem:
+            raise ValueError(f'{problem}: {name}')
+    from course_catalog import generated
+    generated('course_lighting.hpp', write=True).write_text(header(rows))
     (ROOT / 'build').mkdir(exist_ok=True)
     (ROOT / 'build/course-lighting.json').write_text(json.dumps({name: r for name, r in rows}, indent=1) + '\n')
     print(len(rows), 'courses')

@@ -15,7 +15,8 @@ inline constexpr std::array<UiMainMenuControl,7> UiMainMenuControls{{
  {0,-135.f,68.8f},{1,86.4f,68.8f},{1,135.f,68.8f},{1,183.6f,68.8f},
  {2,-172.8f,-93.2f},{2,-97.2f,-93.2f},{3,135.f,-93.2f}
 }};
-struct UiInput {bool up=false,down=false,left=false,right=false,accept=false,back=false,start=false,switchType=false;};
+// pageLeft/pageRight (L/R): the Retro Rewind edition's other cup pages.
+struct UiInput {bool up=false,down=false,left=false,right=false,accept=false,back=false,start=false,switchType=false,pageLeft=false,pageRight=false;};
 struct UiSelection {
  unsigned driver=0,vehicle=0,course=0;bool automatic=false;
  UiMode mode=UiMode::GrandPrix;UiEngineClass engineClass=UiEngineClass::CC150;
@@ -30,6 +31,10 @@ struct UiSelection {
  // The retail unlocked engine-class page switches both 50cc/100cc entries
  // together between their restricted type and the combined kart/bike list.
  bool mixedEngineTypes=false;
+ // Retro Rewind: 150cc races at 200cc (L/R on the class and rules pages, as Pulsar's setting).
+ bool cc200=false;
+ // Retro Rewind: the chosen character's skin (0 default; GarageSkinCounts), L/R on the character page.
+ unsigned skin=0;
  bool operator==(const UiSelection&)const=default;
 };
 // The rules' count values (tools/cook_menu_ui.py bakes a label for each).
@@ -70,6 +75,8 @@ class MenuState {
 public:
  UiPage page=UiPage::Strap;UiSelection selection{};
  unsigned cursor=0,age=0,focusAge=0;bool unavailable=false;
+ // The Cup page shows eight cups: cupPage picks which (more than one page only in the Retro Rewind edition).
+ unsigned cupPage=0;
  // The choice is not unlocked for this license (the notice says "Locked").
  bool locked=false;
  // An empty license slot was chosen: main asks for its name, then creates it.
@@ -98,6 +105,13 @@ public:
  unsigned vehicleChoice(unsigned slot)const;
  unsigned vehicleSlot(unsigned choice)const;
  unsigned engineClassMovie(unsigned slot)const;
+ // The engine class a class-page (or rules Class row) slot shows: retail 50cc,
+ // 100cc, 150cc, Mirror; Retro Rewind 100cc, 150cc, 200cc, Mirror. retailClass:
+ // the retail class whose art and messages the slot uses.
+ static UiEngineClass slotClass(unsigned slot);
+ static bool slotCC200(unsigned slot);
+ static unsigned retailClass(unsigned slot);
+ unsigned classSlot()const;
  // Rules page: its rows for the chosen mode, and the focused row and option.
  unsigned ruleRows()const;UiRuleRowInfo ruleRow(unsigned row)const;
  unsigned ruleSlot(unsigned row,unsigned option)const;

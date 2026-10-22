@@ -138,7 +138,8 @@ bool ObjectAssets::load(int course){
     if(!ok){models.clear();return false;}
     if(find("koopaBall","koopaBall")||find("HeyhoBallGBA","HeyhoBallGBA")||find("K_bomb_car","K_bomb_car")){
         explosion=std::make_unique<Model>();explosionBank=std::make_unique<DriverAnimation>();
-        if(!explosion->load("models/bomb_core.gmdl")||!explosionBank->load("models/bomb_core.dskm",*explosion)){explosion.reset();explosionBank.reset();}
+        explosionMaterials=explosion->load("models/bomb_blast.gmdl");
+        if((!explosionMaterials&&!explosion->load("models/bomb_core.gmdl"))||!explosionBank->load("models/bomb_core.dskm",*explosion)){explosion.reset();explosionBank.reset();}
     }
     return true;
 }
@@ -350,7 +351,9 @@ void CourseObjects::Impl::replay(Renderer& renderer,const ObjectDrawList& list){
         if(r.kind==ObjectDrawRecord::Plain){renderer.draw(*r.target,r.transform);continue;}
         if(r.kind==ObjectDrawRecord::Explosion){
             assets.explosionBank->apply(*assets.explosion,0,r.frame,tick);
-            renderer.draw(*assets.explosion,r.transform);continue;
+            if(assets.explosionMaterials)drawBlast(renderer,*assets.explosion,r.transform,unsigned(r.frame),false);
+            else renderer.draw(*assets.explosion,r.transform);
+            continue;
         }
         RigidPose pose;
         if(r.pose==1){pose.parts=r.parts;pose.palette=list.palettes.data()+r.palette;pose.stride=12;pose.matrices=r.bones;renderer.setRigidPose(&pose);}

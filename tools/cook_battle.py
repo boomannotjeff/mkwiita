@@ -40,7 +40,10 @@ def convert_ui(key,archive):
         relative=tpl.relative_to(folder)
         name=safe(relative.parent.parent.as_posix() if relative.parent.name=='timg' else relative.parent.as_posix())+'__'+safe(tpl.stem)
         png=WORK/'png'/key/(name+'.png');png.parent.mkdir(parents=True,exist_ok=True)
-        image=decode_tpl(tpl).convert('RGBA');image.save(png)
+        image=decode_tpl(tpl).convert('RGBA')
+        # Larger than the GPU's 1024 limit: only Retro Rewind's own Channel icon strip, which no screen here draws.
+        if max(image.size)>1024:print('skipped (over 1024 px):',relative);continue
+        image.save(png)
         target=out/(name+'.t3x')
         subprocess.run([str(tool('tex3ds')),'-f','rgba8','-z','none','-o',str(target),str(png)],check=True,stdout=subprocess.DEVNULL)
         rows.append({'source':relative.as_posix(),'texture':target.relative_to(OUT).as_posix(),'width':image.width,'height':image.height})

@@ -2,11 +2,15 @@
 // Helpers shared by the race item sources (race_items.cpp, item_world.cpp, item_native.cpp).
 #include "mkw/race_items.hpp"
 #include "mkw/held_items.hpp"
+#include "mkw/blooper.hpp"
+#include <algorithm>
 #include <cmath>
 
 namespace mkw::items {
 inline constexpr float Pi=3.14159265358979323846f;
 inline void tick(uint16_t& timer){if(timer)--timer;}
+// A Mushroom washes ink into its fade instead of popping it off, and cancels a pending one.
+inline void washInk(ItemHud& h){h.ink=std::min<uint16_t>(h.ink,BlooperInkFade);h.inkDelay=0;}
 inline bool shell(ItemKind kind){return kind==ItemKind::GreenShell||kind==ItemKind::RedShell||kind==ItemKind::BlueShell;}
 // Bob-ombs trail behind the kart like Bananas until the button is released.
 inline bool singleHeld(ItemKind kind){return kind==ItemKind::GreenShell||kind==ItemKind::RedShell||kind==ItemKind::Banana||kind==ItemKind::FakeBox||kind==ItemKind::Bobomb;}
@@ -21,8 +25,13 @@ inline ItemKind baseKind(ItemKind kind){
         kind==ItemKind::TripleRedShell?ItemKind::RedShell:kind==ItemKind::TripleMushroom?ItemKind::Mushroom:kind;
 }
 inline Vec3 itemMotion(const ItemRacer& r){return r.haveVelocity?r.velocity:normalized(r.forward,{0,0,1})*r.speed;}
+// Held items follow the kart without its wheelie pitch: forward levelled onto levelUp.
+inline void heldFrame(const ItemRacer& r,Vec3& forward,Vec3& up){
+    up=normalized(length(r.levelUp)>.1f?r.levelUp:r.up,{0,1,0});
+    forward=normalized(r.forward-up*dot(r.forward,up),normalized(r.forward,{0,0,1}));
+}
 inline TrailingItemPose trailingPose(const ItemRacer& r,float terrainRadius=40){
-    const Vec3 forward=normalized(r.forward,{0,0,1}),up=normalized(r.up,{0,1,0});
+    Vec3 forward,up;heldFrame(r,forward,up);
     return {r.position+forward*(r.itemGeometry[3]*r.scale.z),forward,up,r.scale,
         r.itemGeometry[0]*(r.bike?.8f:.9f)+40,r.itemGeometry[2]*r.scale.y+terrainRadius,
         r.speed,r.speedRatio,r.hop,dot(r.haveVelocity?r.velocity:r.forward*r.speed,r.forward)>0,!r.grounded};

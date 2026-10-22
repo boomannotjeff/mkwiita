@@ -65,7 +65,14 @@ def cook_course(course, force):
     for archive in archives:
         resource = archive.stem
         texture_prefix = f"obj{course['id']:02d}_{safe(resource)}"
-        for model in mdl0_names(archive):
+        try:
+            models = mdl0_names(archive)
+        except ValueError as error:
+            if not os.environ.get('MKW_RR'): raise
+            print(f"{course['name']}: object archive left out ({error})", flush=True)
+            continue
+        for model in models:
+          try:
             stem = f"obj{course['id']:02d}_{safe(resource)}__{safe(model)}"
             work = ROOT / 'build/object-exports' / course['key'] / safe(resource) / safe(model)
             work.mkdir(parents=True, exist_ok=True)
@@ -82,19 +89,25 @@ def cook_course(course, force):
             parts = cook(work, OUT, stem, 256, preserve_vertices=True, texture_prefix=texture_prefix, encoded_textures=encoded)
             if len(parts) != 1:
                 raise ValueError(f'{course["name"]}: {resource}/{model} needs {len(parts)} mesh parts')
-            info = json.loads((work / 'bank.json').read_text())
-            animated = info['chr'] or info['pat'] or info['srt'] or info['clr'] or info['palette'] > 1
-            bank_name = '-'
-            if animated:
-                bank_name = stem
-                target = OUT / 'models' / (stem + '.dobj')
-                target.write_bytes(bank.read_bytes())
-            else:
-                (OUT / 'models' / (stem + '.dobj')).unlink(missing_ok=True)
-            lines.append(f"{resource} {model} {parts[0]['name']} {bank_name}\n")
-            report.append({'resource': resource, 'model': model, 'gmdl': parts[0]['name'], 'bank': bank_name,
-                           'bank_bytes': bank.stat().st_size if animated else 0, 'gmdl_bytes': parts[0]['bytes'],
-                           'triangles': parts[0]['triangles'], **{k: info[k] for k in ('palette', 'nodes', 'weighted', 'chr', 'pat', 'srt', 'clr')}})
+          except (ValueError, subprocess.CalledProcessError) as error:
+            # Custom tracks' objects the converter does not take (over 128 matrices,
+            # missing PAT0 textures, several mesh parts...): that model is not drawn.
+            if not os.environ.get('MKW_RR'): raise
+            print(f"{course['name']}: object {resource}/{model} left out ({str(error)[:120]})", flush=True)
+            continue
+          info = json.loads((work / 'bank.json').read_text())
+          animated = info['chr'] or info['pat'] or info['srt'] or info['clr'] or info['palette'] > 1
+          bank_name = '-'
+          if animated:
+              bank_name = stem
+              target = OUT / 'models' / (stem + '.dobj')
+              target.write_bytes(bank.read_bytes())
+          else:
+              (OUT / 'models' / (stem + '.dobj')).unlink(missing_ok=True)
+          lines.append(f"{resource} {model} {parts[0]['name']} {bank_name}\n")
+          report.append({'resource': resource, 'model': model, 'gmdl': parts[0]['name'], 'bank': bank_name,
+                         'bank_bytes': bank.stat().st_size if animated else 0, 'gmdl_bytes': parts[0]['bytes'],
+                         'triangles': parts[0]['triangles'], **{k: info[k] for k in ('palette', 'nodes', 'weighted', 'chr', 'pat', 'srt', 'clr')}})
     manifest.write_text(''.join(lines))
     stamp.parent.mkdir(parents=True, exist_ok=True)
     stamp.write_text(json.dumps({'signature': signature, 'report': report}) + '\n')

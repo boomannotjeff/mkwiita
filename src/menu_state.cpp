@@ -1,5 +1,7 @@
 #include <mkw/menu_ui.hpp>
 #include <mkw/progress.hpp>
+#include <mkw/course_catalog.hpp>
+#include <mkw/garage_skins.hpp>
 #include <algorithm>
 #include <cmath>
 
@@ -9,9 +11,13 @@ constexpr unsigned KartChoices[]={0,1,2,6,7,8};
 constexpr unsigned BikeChoices[]={3,4,5,9,10,11};
 // Each row pairs a kart and bike, in the original machine family order.
 constexpr unsigned AllVehicleChoices[]={0,3,1,4,2,5,6,9,7,10,8,11};
+constexpr unsigned CupsPerPage=8,CupPages=(RaceCupCount+CupsPerPage-1)/CupsPerPage;
+// Retro Rewind tracks outside the cooked cups are listed but not available.
+bool cupReady(unsigned cup){for(unsigned i=cup*4;i<cup*4+4;++i)if(!Courses[i].supported)return false;return true;}
 
 // Bikes in 50cc and karts in 100cc wait for the class's trophies (Progress::mixedTypes).
-bool mixed(const UiSelection& s){return s.mixedEngineTypes&&progress().mixedTypes(unsigned(s.engineClass));}
+// Retro Rewind always offers both.
+bool mixed(const UiSelection& s){return RetroRewindEdition||(s.mixedEngineTypes&&progress().mixedTypes(unsigned(s.engineClass)));}
 bool kartsOnly(const UiSelection& s){return s.mode==UiMode::GrandPrix&&s.engineClass==UiEngineClass::CC50&&!mixed(s);}
 bool bikesOnly(const UiSelection& s){return s.mode==UiMode::GrandPrix&&s.engineClass==UiEngineClass::CC100&&!mixed(s);}
 // A cup the current license may race: Time Trials take one open in any class.
@@ -38,7 +44,7 @@ unsigned moveMainMenu(unsigned cursor,const UiInput& key){
 void normalize(UiSelection& s){
  if(s.driver>=UiCharacters.size())s.driver=0;
  if(s.vehicle>=12)s.vehicle=0;
- if(s.course>=32)s.course=0;
+ if(s.course>=RaceCourseCount)s.course=0;
  if(s.battleStage>=10)s.battleStage=0;
  if(s.license>=4)s.license=0;
  if(s.cpuLevel>2)s.cpuLevel=1;
@@ -55,7 +61,7 @@ void normalize(UiSelection& s){
 bool autoCourse(const UiSelection& s){return (s.mode==UiMode::VS||s.mode==UiMode::Battle)&&s.courseOrder!=0;}
 // The next course (or stage) of an automatic order; first starts the set.
 void nextCourse(UiSelection& s,bool first,unsigned seed){
- const bool battle=s.mode==UiMode::Battle;const unsigned count=battle?10u:32u;
+ const bool battle=s.mode==UiMode::Battle;const unsigned count=battle?10u:RaceCourseCount;
  unsigned& at=battle?s.battleStage:s.course;
  if(s.courseOrder==1){
   // Random (Pages::VSSettings "Randomly choose courses"): any course but the last one.
@@ -63,6 +69,8 @@ void nextCourse(UiSelection& s,bool first,unsigned seed){
   const unsigned pick=x%(first?count:count-1);
   at=first||pick<at?pick:pick+1;
  }else at=first?0:(at+1)%count;
+ // Skip courses that are not available (all are, outside the Retro Rewind edition).
+ if(!battle)for(unsigned n=0;n<count&&!Courses[at].supported;++n)at=(at+1)%count;
 }
 unsigned gridColumn(UiPage page,unsigned slot,unsigned columns){
  // The two Mii buttons occupy the right half of a seventh character row.
@@ -88,6 +96,19 @@ unsigned moveGrid(UiPage page,unsigned cursor,unsigned count,unsigned columns,co
 }
 }
 
+// Retro Rewind drops 50cc for 200cc after 150cc (Pulsar's 200cc: 150cc at 1.5x speed).
+UiEngineClass MenuState::slotClass(unsigned slot){
+ slot=std::min(slot,3u);
+ if(!RetroRewindEdition)return UiEngineClass(slot);
+ constexpr UiEngineClass classes[]={UiEngineClass::CC100,UiEngineClass::CC150,UiEngineClass::CC150,UiEngineClass::Mirror};
+ return classes[slot];
+}
+bool MenuState::slotCC200(unsigned slot){return RetroRewindEdition&&slot==2;}
+unsigned MenuState::retailClass(unsigned slot){return unsigned(slotClass(slot));}
+unsigned MenuState::classSlot()const{
+ for(unsigned i=0;i<4;++i)if(slotClass(i)==selection.engineClass&&slotCC200(i)==selection.cc200)return i;
+ return RetroRewindEdition?1:unsigned(selection.engineClass);
+}
 unsigned MenuState::ruleRows()const{return selection.mode==UiMode::Battle?unsigned(UiBattleRules.size()):unsigned(UiVSRules.size());}
 UiRuleRowInfo MenuState::ruleRow(unsigned row)const{
  return selection.mode==UiMode::Battle?UiBattleRules[std::min(row,unsigned(UiBattleRules.size()-1))]:UiVSRules[std::min(row,unsigned(UiVSRules.size()-1))];
@@ -103,7 +124,7 @@ void MenuState::ruleCursor(unsigned& row,unsigned& option)const{
 }
 unsigned MenuState::ruleChoice(UiRuleRow row)const{
  switch(row){
- case UiRuleRow::Class:return unsigned(selection.engineClass);
+ case UiRuleRow::Class:return classSlot();
  case UiRuleRow::Cpu:return selection.cpuLevel;
  case UiRuleRow::Vehicles:return selection.cpuVehicles;
  case UiRuleRow::Courses:return selection.courseOrder;
@@ -121,7 +142,7 @@ unsigned MenuState::count()const{
  case UiPage::Character:return unsigned(UiCharacterDrivers.size());
  case UiPage::Vehicle:return kartsOnly(selection)||bikesOnly(selection)?6:12;
  case UiPage::VSMode:case UiPage::BattleMode:case UiPage::BattleCup:case UiPage::Drift:case UiPage::QuitConfirm:return 2;
- case UiPage::Cup:return 8;
+ case UiPage::Cup:return std::min(CupsPerPage,RaceCupCount-cupPage*CupsPerPage);
  case UiPage::Course:return 4;
  case UiPage::BattleStage:return 5;
  case UiPage::Ghost:return ghostAvailable?3:1; // without a ghost only Solo is offered
@@ -157,14 +178,14 @@ unsigned MenuState::vehicleSlot(unsigned choice)const{
 }
 
 unsigned MenuState::engineClassMovie(unsigned slot)const{
- slot=std::min(slot,3u);
- return selection.mixedEngineTypes&&slot<2&&progress().mixedTypes(slot)?slot+4:slot;
+ slot=retailClass(slot);
+ return (RetroRewindEdition||(selection.mixedEngineTypes&&progress().mixedTypes(slot)))&&slot<2?slot+4:slot;
 }
 
 bool MenuState::supportsRace()const{
  // Browsing a retail menu does not silently change the chosen race rules or
  // substitute a different character/machine when that runtime is unavailable.
- const bool courseReady=selection.mode==UiMode::Battle?selection.battleStage<10:selection.course<32;
+ const bool courseReady=selection.mode==UiMode::Battle?selection.battleStage<10:selection.course<RaceCourseCount&&Courses[selection.course].supported;
  return raceMode(selection.mode)&&(selection.mode!=UiMode::GrandPrix||raceEngineClass(selection.engineClass))&&raceDriver(selection.driver)&&raceVehicle(selection.vehicle)&&courseReady;
 }
 
@@ -176,7 +197,7 @@ void MenuState::enter(UiPage next){
  switch(page){
  case UiPage::License:cursor=selection.license;break;
  case UiPage::Mode:cursor=unsigned(selection.mode);break;
- case UiPage::EngineClass:cursor=unsigned(selection.engineClass);break;
+ case UiPage::EngineClass:cursor=classSlot();break;
  case UiPage::VSMode:cursor=selection.teams?1:0;break;
  case UiPage::BattleMode:cursor=selection.coinRunners?1:0;break;
  case UiPage::Rules:cursor=ruleSlot(0,ruleChoice(ruleRow(0).row));break;
@@ -185,7 +206,7 @@ void MenuState::enter(UiPage next){
   break;
  case UiPage::Vehicle:cursor=vehicleSlot(selection.vehicle);break;
  case UiPage::Drift:cursor=selection.automatic?0:1;break;
- case UiPage::Cup:cursor=selection.course/4;break;
+ case UiPage::Cup:cupPage=selection.course/4/CupsPerPage;cursor=selection.course/4%CupsPerPage;break;
  case UiPage::Course:cursor=selection.course%4;break;
  case UiPage::BattleCup:cursor=selection.battleStage/5;break;
  case UiPage::BattleStage:cursor=selection.battleStage%5;break;
@@ -233,6 +254,36 @@ UiAction MenuState::input(UiInput key){
   focusAge=0;unavailable=locked=false;
   return UiAction::None;
  }
+ if(RetroRewindEdition&&(key.pageLeft||key.pageRight)&&page==UiPage::Character){
+  // The focused character's skins, then back to the default.
+  const unsigned driver=characterDriver(cursor),skins=driver<GarageSkinCounts.size()?GarageSkinCounts[driver]:0;
+  // Skins that did not cook (GarageSkinMask) are skipped.
+  for(unsigned n=0;skins&&n<=skins;++n){
+   selection.skin=(selection.skin+(key.pageLeft?skins:1))%(skins+1);
+   if(!selection.skin||(GarageSkinMask[driver]>>selection.skin&1))break;
+  }
+  focusAge=0;unavailable=false;
+  return UiAction::None;
+ }
+ if(RetroRewindEdition&&page==UiPage::Cup&&(key.up||key.down||key.left||key.right)){
+  // Pulsar's cup grid: slot = column*2 + row. Past either end, the next page.
+  const unsigned previous=cursor,row=cursor%2,col=cursor/2;unsigned n=count();
+  if(key.up||key.down){if((cursor^1u)<n)cursor^=1u;}
+  else if(key.right&&col+1<(n+1)/2)cursor=std::min(cursor+2,n-1);
+  else if(key.left&&col>0)cursor-=2;
+  else if(CupPages>1){
+   cupPage=(cupPage+(key.left?CupPages-1:1))%CupPages;n=count();
+   cursor=std::min(key.left?((n+1)/2-1)*2+row:row,n-1);
+  }
+  if(cursor!=previous)focusAge=0;
+  uiFocusSelect(*this,previous);unavailable=false;
+  return UiAction::None;
+ }
+ if(page==UiPage::Cup&&(key.pageLeft||key.pageRight)&&CupPages>1){
+  cupPage=(cupPage+(key.pageLeft?CupPages-1:1))%CupPages;cursor=std::min(cursor,count()-1);
+  focusAge=0;unavailable=false;uiFocusReset(*this);
+  return UiAction::None;
+ }
  if(page==UiPage::Rules&&(key.up||key.down||key.left||key.right)){
   // Rows move up and down, keeping the column; left and right move within a
   // row, and step the race (or win) count on its UpDown row.
@@ -266,7 +317,7 @@ UiAction MenuState::input(UiInput key){
    const int step=key.up||(!key.down&&key.left)?-1:1;
    cursor=(int(cursor)+int(count())+step)%count();
   }else cursor=moveGrid(page,cursor,count(),columns(),key);
-  if(cursor!=previousCursor)focusAge=0;
+  if(cursor!=previousCursor){focusAge=0;if(page==UiPage::Character)selection.skin=0;}
   uiFocusSelect(*this,previousCursor);unavailable=false;
  }
  if(!key.accept&&!(key.start&&(page==UiPage::Title||page==UiPage::Strap||page==UiPage::Intro)))return UiAction::None;
@@ -285,9 +336,9 @@ UiAction MenuState::input(UiInput key){
   selection.mode=UiMode(cursor);
   enter(selection.mode==UiMode::GrandPrix?UiPage::EngineClass:selection.mode==UiMode::VS?UiPage::VSMode:selection.mode==UiMode::Battle?UiPage::BattleMode:UiPage::Character);break;
  case UiPage::EngineClass:
-  if(!raceEngineClass(UiEngineClass(cursor))){unavailable=true;break;}
-  if(UiEngineClass(cursor)==UiEngineClass::Mirror&&!progress().mirror()){unavailable=locked=true;break;}
-  selection.engineClass=UiEngineClass(cursor);enter(UiPage::Character);break;
+  if(!raceEngineClass(slotClass(cursor))){unavailable=true;break;}
+  if(slotClass(cursor)==UiEngineClass::Mirror&&!progress().mirror()){unavailable=locked=true;break;}
+  selection.engineClass=slotClass(cursor);selection.cc200=slotCC200(cursor);enter(UiPage::Character);break;
  case UiPage::VSMode:
   selection.teams=cursor==1;enter(UiPage::Rules);break;
  case UiPage::BattleMode:
@@ -297,8 +348,8 @@ UiAction MenuState::input(UiInput key){
   unsigned row,option;ruleCursor(row,option);
   switch(ruleRow(row).row){
   case UiRuleRow::Class:
-   if(UiEngineClass(option)==UiEngineClass::Mirror&&!progress().mirror()){unavailable=locked=true;break;}
-   selection.engineClass=UiEngineClass(option);break;
+   if(slotClass(option)==UiEngineClass::Mirror&&!progress().mirror()){unavailable=locked=true;break;}
+   selection.engineClass=slotClass(option);selection.cc200=slotCC200(option);break;
   case UiRuleRow::Cpu:selection.cpuLevel=option;break;
   case UiRuleRow::Vehicles:selection.cpuVehicles=option;break;
   case UiRuleRow::Courses:selection.courseOrder=option;break;
@@ -321,12 +372,17 @@ UiAction MenuState::input(UiInput key){
   selection.automatic=cursor==0;
   if(autoCourse(selection)){nextCourse(selection,true,age+focusAge*7919u);enter(UiPage::Confirm);break;}
   enter(selection.mode==UiMode::Battle?UiPage::BattleCup:UiPage::Cup);break;
- case UiPage::Cup:
+ case UiPage::Cup:{
   // A Grand Prix selects the whole cup. VS and Time Trials select a course.
-  if(!cupOpen(selection,cursor)){unavailable=locked=true;break;}
-  if(selection.course/4!=cursor||selection.mode==UiMode::GrandPrix)selection.course=cursor*4;
+  const unsigned cup=cupPage*CupsPerPage+cursor;
+  if(!cupOpen(selection,cup)){unavailable=locked=true;break;}
+  if(selection.mode==UiMode::GrandPrix&&!cupReady(cup)){unavailable=true;break;}
+  if(selection.course/4!=cup||selection.mode==UiMode::GrandPrix)selection.course=cup*4;
   enter(selection.mode==UiMode::GrandPrix?UiPage::Confirm:UiPage::Course);break;
- case UiPage::Course:selection.course=selection.course/4*4+cursor;enter(selection.mode==UiMode::TimeTrials?UiPage::Ghost:UiPage::Confirm);break;
+ }
+ case UiPage::Course:
+  if(!Courses[selection.course/4*4+cursor].supported){unavailable=true;break;}
+  selection.course=selection.course/4*4+cursor;enter(selection.mode==UiMode::TimeTrials?UiPage::Ghost:UiPage::Confirm);break;
  case UiPage::Ghost:
   selection.ghost=ghostAvailable?cursor:2;enter(UiPage::Confirm);break;
  case UiPage::BattleCup:

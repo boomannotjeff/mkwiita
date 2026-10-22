@@ -1,7 +1,10 @@
 #pragma once
 #include <array>
 #include <cstdint>
+#include <mkw/course_catalog.hpp>
 namespace mkw {
+// Cups of four races (8 retail; the Retro Rewind edition's Retro and Custom cups).
+inline constexpr unsigned RaceCupCount=RaceCourseCount/4;
 // Licenses and what each one has unlocked (the retail unlock conditions, as
 // IGN's Mario Kart Wii unlockables list gives them). Unlocks are not stored:
 // they follow from the results kept here, so they can't drift from them.
@@ -12,13 +15,17 @@ struct License {
     char name[11]{};                         // up to 10 characters (a Mii name's length)
     // Grand Prix by engine class (50cc, 100cc, 150cc, Mirror) and cup: the best
     // trophy (0 none, 1 bronze, 2 silver, 3 gold) and rank in stars (0..3).
-    std::array<std::array<uint8_t,8>,4> trophy{},stars{};
-    std::array<uint32_t,32> bestTimes{};     // Time Trial milliseconds per course, 0 none
-    uint32_t timeTrialCourses=0;             // courses finished in Time Trials, one bit each
+    std::array<std::array<uint8_t,RaceCupCount>,4> trophy{},stars{};
+    std::array<uint32_t,RaceCourseCount> bestTimes{}; // Time Trial milliseconds per course, 0 none
+    uint32_t timeTrialCourses=0;             // the first 32 courses finished in Time Trials, one bit each
 };
 struct Progress {
     static constexpr unsigned Licenses=4;
+#ifdef MKW_RR
+    bool unlockAll=true;                     // Retro Rewind: everything is unlocked
+#else
     bool unlockAll=false;
+#endif
     std::array<License,Licenses> license{};
     unsigned current=0;                      // the license chosen on the License page
     License& me(){return license[current<Licenses?current:0];}

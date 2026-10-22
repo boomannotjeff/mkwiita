@@ -169,13 +169,12 @@ bool RaceBottomScreen::load(Renderer& renderer,unsigned course){
         return true;
     }
     unload(renderer);
-    if(!renderer.enableBottom())return false;
+    // The Vita has no bottom screen: no target of its own, only the corner map's assets.
     m.target=true;m.course=course;
     m.quads.reset(new(std::nothrow) Renderer::MaterialQuad[2*QuadCapacity]);
     if(!m.quads){unload(renderer);return false;}
     renderer.loadVramTexture(m.atlas,RaceMapAtlasTexture);
     m.arena=arena;
-    if(!arena){const auto& c=RaceMapCourses[course];renderer.loadVramTexture(m.map,c.texture);renderer.loadVramTexture(m.overview,c.overview);}
     m.started=false;m.blend=0;m.overviewWanted=false;m.standings=0;m.rowsSet=false;
     m.miniMap.reset();m.miniBuilt=false;
     m.wiiMap=false;m.wiiMapTexture.reset();m.wiiStart.reset();

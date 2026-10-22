@@ -15,7 +15,9 @@ struct GhostFrame {
     uint8_t buttons=0;  // Kinoko pad buttons (1 accelerate, 2 brake/drift, 8 drift with accelerate)
     int8_t stick=0;     // the Wii lattice, -7..7
     uint8_t trick=0;    // Kinoko::System::Trick
-    uint8_t items=0;    // ItemInput: 1 use, 2 backwards, 4 forwards
+    uint8_t items=0;    // ItemInput: 1 use, 2 backwards, 4 forwards; high nibble stick Y + 8 (0: neutral, older ghosts)
+    static constexpr uint8_t packStickY(int y){return uint8_t((y+8)<<4);}
+    int stickY() const{return items>>4?int(items>>4)-8:0;}
 };
 struct GhostPose {
     float pos[3]{};

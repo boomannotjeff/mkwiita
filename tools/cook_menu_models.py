@@ -137,21 +137,42 @@ def main():
         write_icon_parameters()
     sources = [(str(i), ROOT/'assets/menu-models/Driver'/f'{stem}.brres',
                 f'ui_driver_{i}', 'sel_wait') for i, stem in enumerate(DRIVERS)]
+    poses = {str(i): ROOT/'assets/menu-models/Kart'/stem.removesuffix('_menu')/'driver_anim.brres' for i, stem in enumerate(DRIVERS)}
+    if os.environ.get('MKW_RR'):
+        # Retro Rewind skins (tools/rr_overlay.py): Scene/Model/Driver/<driver>-<n>.brres,
+        # posed from their own <driver>-<n>-allkart.szs, as ui_driver_<i>_s<n> (menu_models.cpp).
+        from unpack_szs import unpack
+        for i, stem in enumerate(DRIVERS):
+            stem = stem.removesuffix('_menu')
+            for n in range(1, 10):
+                model = ROOT/'data/extracted/Scene/Model/Driver'/f'{stem}-{n}.brres'
+                if not model.is_file(): break
+                kart = ROOT/'assets/menu-models/Kart'/f'{stem}-{n}'
+                allkart = ROOT/'data/extracted/Scene/Model/Kart'/f'{stem}-{n}-allkart.szs'
+                if not kart.is_dir() and allkart.is_file(): unpack(allkart, kart)
+                sources.append((f'{i}_s{n}', model, f'ui_driver_{i}_s{n}', 'sel_wait'))
+                poses[f'{i}_s{n}'] = kart/'driver_anim.brres'
     sources += [(stem, ROOT/'assets/menu-models/BackModel'/f'{stem}.brres',
                  f'ui_back_{i}', 'loop') for i, stem in enumerate(BACKGROUNDS)]
-    for key, source, prefix, idle in sources:
+    def one(item):
+        key, source, prefix, idle = item
         if args.only and key not in args.only:
-            continue
+            return None
         export = ROOT/'build/menu-models'/prefix
-        result = subprocess.run(['node', str(ROOT/'build/export_brres.mjs'), str(source),
-                                 str(export), 'model', idle, '0'],
-                                check=True, capture_output=True, text=True,env={**os.environ,'MKW_MENU_MATERIALS':'1'})
+        command = ['node', str(ROOT/'build/export_brres.mjs'), str(source), str(export), 'model', idle, '0']
+        result = subprocess.run(command, capture_output=True, text=True,env={**os.environ,'MKW_MENU_MATERIALS':'1'})
+        if result.returncode and '_s' in key and 'Missing requested animation' in result.stderr:
+            # A Retro Rewind skin model without menu animations (mr-3): its bind pose,
+            # animated below from the base character's menu model (same skeleton).
+            poses[key] = ROOT/'assets/menu-models/Driver'/f"{DRIVERS[int(key.split('_')[0])]}.brres"
+            result = subprocess.run(command[:-2]+['', '0'], capture_output=True, text=True,env={**os.environ,'MKW_MENU_MATERIALS':'1'})
+        if result.returncode:raise subprocess.CalledProcessError(result.returncode, command, result.stdout, result.stderr)
         parts = cook(export, args.output, prefix, max_texture=256, preserve_vertices=True,reuse_textures=args.reuse_textures)
         if len(parts) != 1:
             raise ValueError('Menu animation needs one bounded model: '+prefix)
         animation_path = args.output/'models'/f'{prefix}.dskm'
         env=os.environ.copy()
-        extra=ROOT/'assets/menu-models/Kart'/DRIVERS[int(key)].removesuffix('_menu')/'driver_anim.brres' if key.isdecimal() else None
+        extra=poses.get(key)
         if extra and extra.is_file():env['MKW_ANIMATION_SOURCE']=str(extra)
         result = subprocess.run(['node', str(ROOT/'build/export_driver.mjs'), str(source),
                                  str(animation_path), 'model'],
@@ -163,8 +184,12 @@ def main():
                   'source_sha256': sha(source), 'animation_sha256': sha(animation_path),
                   'animation': animation, 'model': parts[0], 'idle_clip': idle,'conversion_revision':3,'material_converter_sha256':material_revision()}
         if extra and extra.is_file():record['seated_animation_source']={'path':extra.relative_to(ROOT).as_posix(),'sha256':sha(extra)}
-        records=[r for r in records if r['prefix']!=prefix]+[record]
         (args.output/'models'/f'{prefix}-source.json').write_text(json.dumps(record, indent=2)+'\n')
+        return record
+    # Each model is its own export, cook and animation bank (147 with every Retro Rewind skin).
+    with ThreadPoolExecutor(max_workers=args.jobs) as pool:
+        for record in pool.map(one, sources):
+            if record:records=[r for r in records if r['prefix']!=record['prefix']]+[record]
     if args.machines:
         items=[(i,c) for i in range(24) for c in range(12)]
         with ThreadPoolExecutor(max_workers=args.jobs) as pool:

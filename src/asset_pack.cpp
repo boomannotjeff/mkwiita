@@ -1,3 +1,4 @@
+#define _GNU_SOURCE 1 // fopencookie (newlib hides it otherwise)
 #include <mkw/asset_pack.hpp>
 #include <3ds.h>
 #include <algorithm>
@@ -16,10 +17,12 @@ struct Archive {
   return it!=entries.end()&&!std::strcmp(names.data()+it->name,key)?&*it:nullptr;
  }
 };
-// Menu assets first, then race assets. Both stay open for the session.
+// Menu assets first, then race assets, which continue in race2.pak.. past
+// 2 GiB (tools/pack_race_assets.py). All stay open for the session; a part
+// that does not exist is skipped.
 struct Archives {
  LightLock lock;bool tried=false;
- std::array<Archive,2> list{{{"menu.pak"},{"race.pak"}}};
+ std::array<Archive,6> list{{{"menu.pak"},{"race.pak"},{"race2.pak"},{"race3.pak"},{"race4.pak"},{"race5.pak"}}};
  Archives(){LightLock_Init(&lock);}
 };
 Archives& archives(){static Archives value;return value;}
@@ -68,5 +71,19 @@ bool readRange(const char* path,size_t offset,void* destination,size_t bytes){
 bool read(const char* path,std::vector<uint8_t>& out){
  const long bytes=size(path);if(bytes<0)return false;
  out.resize(size_t(bytes));return readInto(path,out.data(),out.size());
+}
+std::FILE* openFile(const char* path){
+ struct Cookie{std::vector<uint8_t> data;size_t at=0;};
+ auto* c=new Cookie;
+ if(!read(path,c->data)){delete c;return nullptr;}
+ cookie_io_functions_t io{};
+ io.read=[](void* p,char* out,size_t n)->ssize_t{auto& c=*static_cast<Cookie*>(p);n=std::min(n,c.data.size()-c.at);std::memcpy(out,c.data.data()+c.at,n);c.at+=n;return ssize_t(n);};
+ io.seek=[](void* p,auto* offset,int whence)->int{
+  auto& c=*static_cast<Cookie*>(p);
+  const long long to=(whence==SEEK_SET?0:whence==SEEK_CUR?(long long)c.at:(long long)c.data.size())+*offset;
+  if(to<0||to>(long long)c.data.size())return -1;
+  c.at=size_t(to);*offset=to;return 0;};
+ io.close=[](void* p)->int{delete static_cast<Cookie*>(p);return 0;};
+ std::FILE* f=fopencookie(c,"r",io);if(!f)delete c;return f;
 }
 }

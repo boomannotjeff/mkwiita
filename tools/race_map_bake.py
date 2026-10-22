@@ -218,7 +218,8 @@ def course_lighting(archive):
     """Lights (flags, space, direction, colour) and ambient colours of one course
     from include/mkw/course_lighting.hpp (tools/cook_course_lighting.py)."""
     import re
-    text = (ROOT / 'include/mkw/course_lighting.hpp').read_text()
+    from course_catalog import generated
+    text = generated('course_lighting.hpp').read_text()
     start = text.index('{"' + archive + '"')
     body = text[start:text.index('\n', start)]
     lights = [(int(f), int(s), (float(x), float(y), float(z)), int(c, 16))

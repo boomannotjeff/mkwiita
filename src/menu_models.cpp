@@ -45,7 +45,9 @@ const char* seatedClip(unsigned driver,unsigned choice) {
     if(weight==1)return vehicle==22||vehicle==31||vehicle==34?"ma_bike-wait":"mdf_bike-wait";
     return vehicle==26||vehicle==29||vehicle==35?"lb_bike-wait":"ldf_bike-wait";
 }
-struct Wanted {int driver=-1,machine=-1,background=-1;};
+// skin: the Retro Rewind skin shown (0 default); its driver model id is driver+100*skin.
+struct Wanted {int driver=-1,machine=-1,background=-1,skin=0;};
+int skinned(int driver,int skin){return driver>=0&&skin>0?driver+100*skin:driver;}
 Wanted wanted(const MenuState& state){
     Wanted w;
     w.driver=state.page==UiPage::Character?int(state.characterDriver(state.cursor)):
@@ -53,6 +55,7 @@ Wanted wanted(const MenuState& state){
     const unsigned choice=state.page==UiPage::Vehicle?state.vehicleChoice(state.cursor):state.selection.vehicle;
     w.machine=machinePage(state.page)&&w.driver>=0&&w.driver<24&&choice<12?w.driver*12+int(choice):-1;
     if(w.driver>=24)w.driver=-1;
+    w.skin=int(state.selection.skin);
     w.background=backgroundFor(state);
     return w;
 }
@@ -82,7 +85,8 @@ struct ModelJob final:AssetJob {
     ModelJob(int k,int i):kind(k),id(i){
         label=k==Driver?"driver model":k==Background?"background model":"machine model";
         char path[96];
-        if(k==Driver){std::snprintf(path,sizeof path,"models/ui_driver_%d_000.gmdl",i);modelPath=path;std::snprintf(path,sizeof path,"models/ui_driver_%d.dskm",i);animationPath=path;}
+        if(k==Driver&&i>=100){std::snprintf(path,sizeof path,"models/ui_driver_%d_s%d_000.gmdl",i%100,i/100);modelPath=path;std::snprintf(path,sizeof path,"models/ui_driver_%d_s%d.dskm",i%100,i/100);animationPath=path;}
+        else if(k==Driver){std::snprintf(path,sizeof path,"models/ui_driver_%d_000.gmdl",i);modelPath=path;std::snprintf(path,sizeof path,"models/ui_driver_%d.dskm",i);animationPath=path;}
         if(k==Background){std::snprintf(path,sizeof path,"models/ui_back_%d_000.gmdl",i);modelPath=path;std::snprintf(path,sizeof path,"models/ui_back_%d.dskm",i);animationPath=path;}
         if(k==Machine){std::snprintf(path,sizeof path,"models/ui_machine_%d_%u_000.gmdl",i/12,unsigned(i%12));modelPath=path;}
     }
@@ -121,7 +125,7 @@ MenuModels::Entry& MenuModels::obtain(int kind,int id){
 }
 void MenuModels::request(const MenuState& state,AssetPriority priority){
     const auto w=wanted(state);
-    const std::pair<int,int> items[]={{Driver,w.driver},{Background,w.background},{Machine,w.machine}};
+    const std::pair<int,int> items[]={{Driver,skinned(w.driver,w.skin)},{Background,w.background},{Machine,w.machine}};
     for(const auto& [kind,id]:items){
         if(id<0)continue;
         auto& e=obtain(kind,id);e.used=clock_;if(priority!=AssetPriority::Prefetch)e.pinned=clock_;
@@ -132,7 +136,7 @@ void MenuModels::request(const MenuState& state,AssetPriority priority){
 }
 bool MenuModels::ready(const MenuState& state)const{
     const auto w=wanted(state);
-    const std::pair<int,int> items[]={{Driver,w.driver},{Background,w.background},{Machine,w.machine}};
+    const std::pair<int,int> items[]={{Driver,skinned(w.driver,w.skin)},{Background,w.background},{Machine,w.machine}};
     for(const auto& [kind,id]:items){
         if(id<0)continue;
         const auto* e=find(kind,id);
@@ -169,7 +173,7 @@ void MenuModels::update(Renderer& renderer,const MenuState& visual){
     choose(Background,w.background,shownBackground_);
     choose(Machine,w.machine,shownMachine_);
     // The seated driver must be the one on the displayed machine.
-    choose(Driver,shownMachine_>=0?shownMachine_/12:w.driver,shownDriver_);
+    choose(Driver,skinned(shownMachine_>=0?shownMachine_/12:w.driver,w.skin),shownDriver_);
     if(auto* driver=shownDriver_>=0?find(Driver,shownDriver_):nullptr;driver&&driver->animation){
         const int clip=driver->animation->find(shownMachine_>=0?seatedClip(unsigned(shownMachine_/12),unsigned(shownMachine_%12)):"sel_wait");
         if(clip!=driverClip_){driver->animation->clearPoseTransition();driverFrame_=0;}

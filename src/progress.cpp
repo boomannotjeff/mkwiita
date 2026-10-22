@@ -8,14 +8,15 @@
 
 namespace mkw {
 namespace {
-constexpr const char* SavePath="ux0:data/mkw/save.bin";
-constexpr const char* LegacyTimes="ux0:data/mkw/best-times.bin";
+constexpr const char* SavePath=MKW_DATA_ROOT "/save.bin";
+constexpr const char* LegacyTimes=MKW_DATA_ROOT "/best-times.bin";
 constexpr uint32_t Magic=0x4d4b5750,Version=1; // "MKWP"
 enum Class:unsigned{CC50,CC100,CC150,Mirror};
 constexpr unsigned WiiCups[]={0,1,2,3},RetroCups[]={4,5,6,7},AllCups[]={0,1,2,3,4,5,6,7};
+constexpr bool RetroRewind=RetroRewindEdition; // everything is unlocked, as in Retro Rewind
 void ghostFile(unsigned slot,unsigned course,char* out,std::size_t size){
-    if(slot<Progress::Licenses)std::snprintf(out,size,"ux0:data/mkw/ghosts/l%u/course_%02u.mkg",slot,course);
-    else std::snprintf(out,size,"ux0:data/mkw/ghosts/course_%02u.mkg",course); // before licenses
+    if(slot<Progress::Licenses)std::snprintf(out,size,MKW_DATA_ROOT "/ghosts/l%u/course_%02u.mkg",slot,course);
+    else std::snprintf(out,size,MKW_DATA_ROOT "/ghosts/course_%02u.mkg",course); // before licenses
 }
 }
 Progress& progress(){static Progress value;return value;}
@@ -28,14 +29,14 @@ bool Progress::load(){
                   std::fread(&all,1,1,f)==1&&std::fread(license.data(),sizeof license,1,f)==1;
     std::fclose(f);
     if(!ok){*this=Progress{};return false;}
-    unlockAll=all!=0;
+    unlockAll=all!=0||RetroRewind;
     for(auto& l:license)l.name[sizeof l.name-1]=0;
     return true;
 }
 // A temporary file first, so a pulled card or a crash keeps the previous save.
 bool Progress::save()const{
-    mkdir("ux0:data",0777);mkdir("ux0:data/mkw",0777);
-    constexpr const char* Temporary="ux0:data/mkw/save.tmp";
+    mkdir("ux0:data",0777);mkdir(MKW_DATA_ROOT,0777);
+    constexpr const char* Temporary=MKW_DATA_ROOT "/save.tmp";
     FILE* f=std::fopen(Temporary,"wb");if(!f)return false;
     const uint32_t head[2]{Magic,Version};const uint8_t all=unlockAll;
     const bool ok=std::fwrite(head,sizeof head,1,f)==1&&std::fwrite(&all,1,1,f)==1&&std::fwrite(license.data(),sizeof license,1,f)==1;
@@ -53,21 +54,22 @@ void Progress::create(unsigned slot,const char* name){
     if(FILE* f=std::fopen(LegacyTimes,"rb")){
         std::array<uint32_t,32> times{};
         const bool ok=std::fread(times.data(),sizeof times,1,f)==1;std::fclose(f);
-        if(ok){l.bestTimes=times;for(unsigned c=0;c<32;++c)if(times[c])l.timeTrialCourses|=1u<<c;}
-        std::rename(LegacyTimes,"ux0:data/mkw/best-times.imported.bin");
+        if(ok){std::copy_n(times.begin(),std::min<std::size_t>(32,RaceCourseCount),l.bestTimes.begin());for(unsigned c=0;c<32;++c)if(times[c])l.timeTrialCourses|=1u<<c;}
+        std::rename(LegacyTimes,MKW_DATA_ROOT "/best-times.imported.bin");
     }
-    mkdir("ux0:data/mkw/ghosts",0777);
-    char dir[48];std::snprintf(dir,sizeof dir,"ux0:data/mkw/ghosts/l%u",slot);mkdir(dir,0777);
+    mkdir(MKW_DATA_ROOT "/ghosts",0777);
+    char dir[48];std::snprintf(dir,sizeof dir,MKW_DATA_ROOT "/ghosts/l%u",slot);mkdir(dir,0777);
     for(unsigned c=0;c<32;++c){char from[64],to[64];ghostFile(Licenses,c,from,sizeof from);ghostFile(slot,c,to,sizeof to);std::rename(from,to);}
 }
 void Progress::erase(unsigned slot){
     if(slot>=Licenses)return;
     license[slot]=License{};
-    for(unsigned c=0;c<32;++c){char path[64];ghostFile(slot,c,path,sizeof path);std::remove(path);}
+    for(unsigned c=0;c<RaceCourseCount;++c){char path[64];ghostFile(slot,c,path,sizeof path);std::remove(path);}
 }
 
 unsigned Progress::expertGhosts()const{
     unsigned n=0;
+    if(RetroRewind)return 0; // StaffGhosts are the retail courses'
     for(unsigned c=0;c<32;++c)if(me().bestTimes[c]&&me().bestTimes[c]<=StaffGhosts[c].unlock)++n;
     return n;
 }
@@ -166,7 +168,7 @@ const char* Progress::unlockableClass(unsigned i){
 }
 
 void Progress::grandPrix(unsigned cls,unsigned cup,unsigned place,unsigned points){
-    if(cls>3||cup>7||!place)return;
+    if(cls>3||cup>=RaceCupCount||!place)return;
     auto& l=me();
     const uint8_t trophy=place<=3?uint8_t(4-place):0;
     // shortcut: stars from the points total alone (retail also weighs other race stats); match retail's rank formula if a rank comes out wrong.
@@ -175,8 +177,8 @@ void Progress::grandPrix(unsigned cls,unsigned cup,unsigned place,unsigned point
     l.stars[cls][cup]=std::max(l.stars[cls][cup],stars);
 }
 bool Progress::timeTrial(unsigned course,uint32_t ms){
-    if(course>=32||!ms)return false;
-    auto& l=me();l.timeTrialCourses|=1u<<course;
+    if(course>=RaceCourseCount||!ms)return false;
+    auto& l=me();if(course<32)l.timeTrialCourses|=1u<<course;
     if(l.bestTimes[course]&&ms>=l.bestTimes[course])return false;
     l.bestTimes[course]=ms;return true;
 }

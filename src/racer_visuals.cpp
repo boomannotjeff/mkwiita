@@ -5,6 +5,7 @@
 #include <mkw/driver_controller.hpp>
 #include <mkw/garage.hpp>
 #include <mkw/vehicle_animation.hpp>
+#include <mkw/luma_visual.hpp>
 #include <mkw/job_worker.hpp>
 #include <mkw/renderer.hpp>
 #include <mkw/render_quality.hpp>
@@ -29,6 +30,7 @@ struct RacerVisuals::Impl {
         DriverController controller;
         DriverPose pose;
         VehicleAnimation vehicle;
+        std::unique_ptr<LumaVisual> luma; // Rosalina only
         struct Clock {int clip=-1;unsigned start=0;} bodyClock;
         std::array<Clock,9> extraClocks;
     };
@@ -76,6 +78,10 @@ bool RacerVisuals::load(){
             if(r->choice->extraAnimationMask&(1u<<j)){r->extraAnimation[j]=bank(GarageExtraNames[j],r->extras[j].get());valid&=bool(r->extraAnimation[j]);}
         }
         valid&=bool(r->body)&&bool(r->driver)&&bool(r->animation)&&bool(r->shadow);
+        // Rosalina's Luma; a missing one leaves her racing without it.
+        if(player.character==K::Character::Rosalina||player.character==K::Character::Rosalina_Biker_Outfit){
+            r->luma=std::make_unique<LumaVisual>();if(!r->luma->load())r->luma.reset();
+        }
         if(r->animation)for(unsigned c=0;c<r->animation->count();++c)r->controller.setDuration(r->animation->name(c),r->animation->duration(c));
         impl_->racers[i-1]=std::move(r);++impl_->count;
     }
@@ -91,12 +97,12 @@ void RacerVisuals::step(unsigned tick){
     for(unsigned i=0;i<11;++i)if(auto* r=impl_->racers[i].get()){
         auto* kart=K::Kart::KartObjectManager::Instance()->object(i+1);auto& status=kart->status();
         r->vehicle.step(*kart);DriverSignals s;
-        s.bike=kart->param()->isBike();s.wheelie=status.onBit(K::Kart::eStatus::Wheelie);
+        s.bike=kart->param()->isBike();s.wheelie=status.onBit(K::Kart::eStatus::WheelieRot); // pose: see main.cpp
         s.airborne=status.offBit(K::Kart::eStatus::TouchingGround);s.hopping=status.onBit(K::Kart::eStatus::Hop);
         s.steering=kart->inputs()->currentState().stick.x;s.speed=kart->move()->speed();
         s.drift=status.onBit(K::Kart::eStatus::DriftManual,K::Kart::eStatus::DriftAuto);s.driftDirection=kart->move()->hopStickX();
         s.boost=status.onBit(K::Kart::eStatus::Boost);s.trick=status.onBit(K::Kart::eStatus::InATrick,K::Kart::eStatus::ZipperTrick);
-        s.hit=status.onBit(K::Kart::eStatus::InAction,K::Kart::eStatus::Burnout,K::Kart::eStatus::Shocked);
+        s.hit=status.onBit(K::Kart::eStatus::InAction,K::Kart::eStatus::Burnout); // not Shocked: only the spin
         s.accelerating=status.onBit(K::Kart::eStatus::Accelerate);s.braking=status.onBit(K::Kart::eStatus::Brake);
         s.blink=(tick+i*13)%180==0;r->pose=r->controller.step(s);
         auto advance=[&](DriverAnimation* bank,Impl::Racer::Clock& clock,bool handle){
@@ -143,6 +149,7 @@ void RacerVisuals::Impl::prepareRacer(unsigned i){
     C3D_Mtx seated=transform;Mtx_Translate(&seated,0,r->choice->seatY,r->choice->seatZ,true);
     auto frustum=view.model(seated);
     out.draw=true;out.body=transform;out.seated=seated;
+    if(r->luma)r->luma->prepare(view,r->vehicle,tick);
     out.driverVisible=!tiny(*r->driver,seated)&&r->animation->apply(*r->driver,r->animation->find(name),frame,tick,expression,faceFrame,&frustum);
     // Blooper ink paints an inked racer dark (unless a Star outshines it).
     {const auto& hud=items.hud(i+1);out.additive=hud.ink&&!hud.inkDelay&&!hud.star?Renderer::InkColor:starMaterialColor(hud.star);}
@@ -170,6 +177,7 @@ void RacerVisuals::prepare(const Renderer& renderer,const RaceItems& items,Vec3 
         // CPU-skinned banks share one scratch buffer: those racers stay on this thread.
         bool gpu=r->animation&&r->animation->gpuSkinned()&&(!r->bodyAnimation||r->bodyAnimation->gpuSkinned());
         for(const auto& a:r->extraAnimation)gpu&=!a||a->gpuSkinned();
+        gpu&=!r->luma||r->luma->gpuSkinned();
         if(!gpu||!worker.running())continue;
         d.jobContext[i]={&d,i};
         d.jobs[i].reset([](void* c){auto* p=static_cast<std::pair<Impl*,unsigned>*>(c);p->first->prepareRacer(p->second);},&d.jobContext[i]);
@@ -204,6 +212,7 @@ void RacerVisuals::draw(Renderer& renderer,const RaceItems& items,Vec3 viewer,un
         renderer.additiveColor=(ghostMask>>(i+1))&1u?GhostColor:out.additive;
         if(out.bodyVisible)drawSkinned(r->bodyAnimation.get(),*r->body,out.body);
         if(out.driverVisible)drawSkinned(r->animation.get(),*r->driver,out.seated);
+        if(r->luma)r->luma->draw(renderer);
         for(unsigned w=0;w<out.wheels;++w)if(out.wheelVisible[w])renderer.draw(*r->wheels[r->vehicle.modelIndex(w)],out.wheel[w]);
         for(unsigned e=0;e<out.extras;++e){const auto& x=out.extra[e];if(x.visible)drawSkinned(r->extraAnimation[x.part].get(),*r->extras[x.part],x.matrix);}
         renderer.additiveColor=0;

@@ -55,7 +55,10 @@ struct ObjectAssets {
     // The common Bob-omb explosion (Bowser's Castle fireball, Shy Guy Beach cannonballs, Moonview's Bob-omb cars).
     std::unique_ptr<Model> explosion;
     std::unique_ptr<DriverAnimation> explosionBank;
+    bool explosionMaterials=false; // bomb_blast.gmdl with its retail materials, else bomb_core.
 };
+// The retail Bob-omb blast materials at age (src/race_hud.cpp).
+void drawBlast(Renderer&,const Model&,const C3D_Mtx&,unsigned age,bool blue);
 struct Anim {
     int clip=-1;float frame=0;
     int pat=-1;float patFrame=0;

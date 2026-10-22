@@ -67,13 +67,15 @@ struct ItemRacer {
     // action and the stopped/vanished bits; AfterCannon (102) holds an existing lock.
     bool itemLocked=false, afterCannon=false;
     Vec3 up{0,1,0},scale{1,1,1};
+    // KartMove::smoothedUp: the body's up without the wheelie's pitch; zero when unknown.
+    Vec3 levelUp{};
     // kartParam.bin itemUnk170/174/178/17c, exposed for held-item geometry.
     std::array<float,4> itemGeometry{100,80,-12,-15};
     float speedRatio=0,hop=0;
     bool bike=false;
     Vec3 velocity{};
     bool haveVelocity=false;
-    bool shellTargetUnavailable=false,shellAcquireUnavailable=false,shellTargetProtected=false,mushroomBoost=false;
+    bool shellTargetUnavailable=false,shellAcquireUnavailable=false,shellTargetProtected=false,mushroomBoost=false,boosting=false;
     /// Retail fn_1_2AD3B4 (0x807aed08): status 47 (ZipperTrick) or 54 (TrickRot), which
     /// slows a pursuing Red's turn onto the racer's back axis.
     bool trickRotating=false;

@@ -130,6 +130,8 @@ void bindBlast(void* context,std::size_t submesh){
         C3D_DepthTest(true,GPU_GEQUAL,GPU_WRITE_COLOR);
     }
 }
+} // namespace
+// Also used by course explosions (src/course_objects.cpp).
 void drawBlast(Renderer& renderer,const Model& model,const C3D_Mtx& t,unsigned age,bool blue){
     const unsigned frame=std::min(age,BombBlastFrames-1);
     BlastMaterial m{&model,(blue?BombBlastBlue:BombBlastRed)[frame].data()};
@@ -141,6 +143,13 @@ void drawBlast(Renderer& renderer,const Model& model,const C3D_Mtx& t,unsigned a
     // The context is copied by value: a deferred frame draws after this returns.
     renderer.draw(model,t,false,bindBlast,m);
     renderer.setOverrides(nullptr,0);
+}
+namespace {
+// The Blooper's 176-frame attack clip on player 0's screen: from 148 frames before the ink, -1 otherwise.
+int blooperFrame(const ItemHud& h){
+    if(h.inkDelay&&h.inkDelay<=BlooperAttackLead)return int(BlooperAttackLead-h.inkDelay);
+    const unsigned age=BlooperInkDuration-h.ink;
+    return h.ink&&age<176-BlooperAttackLead?int(BlooperAttackLead+age):-1;
 }
 bool outerOnly(void* context,std::size_t submesh){return submesh==static_cast<BoxMaterial*>(context)->layout->outer;}
 void drawBox(Renderer& renderer,const Model& model,const ItemBoxLayout& layout,const std::array<std::array<float,6>,300>& inner,const C3D_Mtx& t,unsigned frame,bool sparkle=true){
@@ -273,7 +282,7 @@ bool RaceHud::load(){
     for(unsigned i=0;i<21;++i){
         if(ItemModels[i]){impl_->models[i]=model(ItemModels[i]);valid&=bool(impl_->models[i]);}
         if(HudItems[i].path)valid&=impl_->icons[i].load(HudItems[i].path);
-        if((i==6||i==7||i==13||i==14||i==15)&&impl_->models[i]){
+        if((i==6||i==7||i==12||i==13||i==14||i==15)&&impl_->models[i]){
             char path[96];std::snprintf(path,sizeof path,"models/item_%u.dskm",i);
             // Unlit and never environment-mapped, these meshes do not read
             // normals: skin positions only (the same position arithmetic).
@@ -364,7 +373,13 @@ void RaceHud::drawWorld(Renderer& renderer,const RaceItems& items,Vec3 viewer,un
         if(effect.deployed&&unsigned(effect.heldKind)<needed.size())needed[unsigned(effect.heldKind)]=true;
     }
     needed[13]=items.hud(0).pow&&items.hud(0).pow<=158;
+    const int blooper=blooperFrame(items.hud(0));needed[12]=blooper>=0;
     for(unsigned i=0;i<21;++i)if(needed[i]&&impl_->animations[i]){
+        if(i==12){
+            const int clip=impl_->animations[i]->find("attack");
+            if(clip>=0)impl_->animations[i]->apply(*impl_->models[i],clip,float(blooper),tick);
+            continue;
+        }
         if(i==13){
             const unsigned left=items.hud(0).pow;if(!left||left>158)continue;
             const char* name=left>110?"attack1":left>60?"attack2":"attack3";
@@ -426,6 +441,14 @@ void RaceHud::drawWorld(Renderer& renderer,const RaceItems& items,Vec3 viewer,un
         // Retail PowObj uses inverse-view up250, back-30 (=look forward30),
         // uniform1.3 scale. Its authored CHR0 performs the three block stomps.
         renderer.drawCameraFacing(*impl_->models[13],{pose[0,3],pose[1,3],pose[2,3]},250.f,30.f,1.3f);
+    }
+    if(blooper>=0&&impl_->models[12]){
+        // GessoScreen: the Blooper rises in front of the view and squirts at it.
+        // shortcut: placement tuned by eye, not read from retail GessoScreen; check against WiiCompiled.
+        // Half its model size: at full size it filled the screen.
+        constexpr float BlooperScale=.5f;
+        C3D_Mtx t;Mtx_Identity(&t);t.r[0].x=t.r[1].y=t.r[2].z=BlooperScale;t.r[1].w=-40.f;t.r[2].w=-420.f;
+        renderer.drawCameraSpace(*impl_->models[12],t);
     }
     for(unsigned i=0;i<Kinoko::System::RaceConfig::Instance()->raceScenario().playerCount;++i){
         const auto& effect=items.hud(i);
@@ -761,9 +784,9 @@ void RaceHud::drawOverlay(Renderer& renderer,const RaceItems& items,unsigned sta
     if(battle.active)drawBattle(renderer,exitLift(1.f));
     else{
     gold(impl_->extras[HudLap],HudExtras[HudLap],lifted(HudLapLabel,-lapLift));gold(impl_->extras[HudSlash],HudExtras[HudSlash],lifted(HudLapSlash,-lapLift));
-    lap=std::clamp(lap,1u,3u);
+    const unsigned laps=std::clamp(lapCount,1u,9u);lap=std::clamp(lap,1u,laps);
     gold(impl_->digits[lap],HudDigits[lap],lifted(HudLapCurrent,-lapLift));
-    gold(impl_->digits[3],HudDigits[3],lifted(HudLapTotal,-lapLift));
+    gold(impl_->digits[laps],HudDigits[laps],lifted(HudLapTotal,-lapLift));
     }
     // Speedometer (not in the original): the player's speed in the game's own
     // units, which Wii speedometer mods label km/h. Bottom right, the one free

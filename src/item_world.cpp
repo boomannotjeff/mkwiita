@@ -150,6 +150,8 @@ void RaceItems::updateScattered(ItemActor& a,ItemWorldQuery query){
     a.position+=surface.correction;
     if(length(surface.floorNormal)>.1f){
         const auto n=normalized(surface.floorNormal);a.velocity=tangent(a.velocity,n);a.settled=true;a.up=n;
+        // A dropped trap lands and stays (ObjThrowable::OnFinishThrow); only shells and boosts slide on.
+        if(trapItem(a.kind)){a.velocity={};a.scattered=false;sound(ItemSoundCue::Land,a);}
     }else a.velocity.y=std::max(-100.f,a.velocity.y-2.2f);
     if(length(surface.wallNormal)>.1f){const auto n=normalized(surface.wallNormal);float into=dot(a.velocity,n);if(into<0)a.velocity=a.velocity-n*(2*into);}
 }
@@ -341,7 +343,7 @@ void RaceItems::actorKartContact(ItemActor& a,unsigned player){
         if(a.scattered&&a.scale<HeldContactMinimumScale)return;
         if(a.kind==ItemKind::Mushroom){
             karts_->activateMushroom(player);events_.push_back({ItemEffect::Mushroom,uint8_t(player)});
-            hud_[player].ink=hud_[player].inkDelay=0;
+            washInk(hud_[player]);
         }else if(karts_->activateStar(player)){
             hud_[player].ink=hud_[player].inkDelay=0;inkReadyFrame_[player]=0;events_.push_back({ItemEffect::Cure,uint8_t(player)});
         }

@@ -309,7 +309,7 @@ namespace {
 // Compiled programs persist on the memory card: ux0:data/mkw/shaders/<key>.bin,
 // and keys.bin lists every key so the next launch loads them all up front.
 // The name mixes in the shader sources, so a changed shader recompiles.
-constexpr const char* CacheDir = "ux0:data/mkw/shaders";
+constexpr const char* CacheDir = MKW_DATA_ROOT "/shaders";
 uint64_t fnv(const void* data, size_t size, uint64_t h = 1469598103934665603ull) {
 	auto* b = static_cast<const uint8_t*>(data);
 	for (size_t i = 0; i < size; ++i) h = (h ^ b[i]) * 1099511628211ull;
@@ -335,7 +335,7 @@ std::string cachePath(const FragmentKey& key) {
 // ux0:data/mkw/no-shader-cache.txt turns the cache off (always compile).
 bool cacheEnabled() {
 	static int enabled = -1;
-	if (enabled < 0) { FILE* f = std::fopen("ux0:data/mkw/no-shader-cache.txt", "rb"); enabled = f ? 0 : 1; if (f) std::fclose(f); }
+	if (enabled < 0) { FILE* f = std::fopen(MKW_DATA_ROOT "/no-shader-cache.txt", "rb"); enabled = f ? 0 : 1; if (f) std::fclose(f); }
 	return enabled == 1;
 }
 bool loadBinary(GLuint program, const FragmentKey& key) {

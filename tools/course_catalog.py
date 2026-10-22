@@ -1,10 +1,29 @@
-"""Canonical local map catalog; IDs and archive names come from pinned Kinoko."""
-import json,re
+"""Canonical local map catalog; IDs and archive names come from pinned Kinoko.
+
+Retro Rewind edition (MKW_RR set): the Retro (RT) and Custom (CT) tracks from
+data/extracted/rr-catalog.json (tools/rr_overlay.py), then the retail arenas.
+A track's 'id' (100+) names its cooked files; 'run_as' is the retail course
+Kinoko runs it as (Pulsar's course slot). Retail: run_as == id.
+"""
+import json,os,re
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 CUPS=[('Mushroom',[8,1,2,4]),('Flower',[0,5,6,7]),('Star',[9,15,11,3]),('Special',[14,10,12,13]),('Shell',[16,20,25,26]),('Banana',[27,31,23,18]),('Leaf',[21,30,29,17]),('Lightning',[24,22,19,28]),('Arena',[33,32,35,34,36,39,40,41,37,38])]
 DISPLAY={4:"Toad's Factory",7:"Wario's Gold Mine",12:"Bowser's Castle",28:"N64 Bowser's Castle",29:"N64 DK's Jungle Parkway",34:'Chain Chomp Wheel'}
-def courses():
+RR_FIRST_ID=100
+def generated(name,write=False):
+    """A header the cook generates. Retail: include/mkw (committed). Retro Rewind:
+    build/rr-include/mkw, which CMake searches first, so the two editions never
+    overwrite each other; until written there, reads see the retail one."""
+    rr=ROOT/'build/rr-include/mkw'/name
+    if os.environ.get('MKW_RR') and (write or rr.is_file()):
+        rr.parent.mkdir(parents=True,exist_ok=True);return rr
+    return ROOT/'include/mkw'/name
+def import_failed(i):
+    """The course's import receipt (tools/import_courses.py) says it failed."""
+    receipt=ROOT/'sd-card/3ds/mkw-3ds/models/courses'/f'{i:02d}.json'
+    return receipt.is_file() and json.loads(receipt.read_text(encoding='utf-8')).get('status')!='imported'
+def retail_courses():
     text=(ROOT/'vendor/kinoko/include/Common.hh').read_text()
     enums={int(n):name for name,n in re.findall(r'(\w+)\s*=\s*(\d+)',text.split('enum class Course {')[1].split('};')[0])}
     names=re.findall(r'"([^"]+)"|\b(nullptr)\b',text.split('COURSE_NAMES[59] = {')[1].split('};')[0])
@@ -12,7 +31,53 @@ def courses():
     for cup,ids in CUPS:
         for slot,i in enumerate(ids):
             archive=names[i][0];assert archive
-            result.append({'id':i,'enum':enums[i],'name':DISPLAY.get(i,enums[i].replace('_',' ')), 'kind':'race' if i<32 else 'arena','cup':cup,'slot':slot,'archive':f'Race/Course/{archive}.szs','key':archive,'prefix':f'course_{i:02d}'})
+            result.append({'id':i,'enum':enums[i],'name':DISPLAY.get(i,enums[i].replace('_',' ')), 'kind':'race' if i<32 else 'arena','cup':cup,'slot':slot,'archive':f'Race/Course/{archive}.szs','key':archive,'prefix':f'course_{i:02d}','run_as':i,'cooked':True})
     assert len(result)==42 and len({c['id'] for c in result})==42
+    for index,c in enumerate(result):c['index']=index
     return result
+
+def rr_courses():
+    data=json.loads((ROOT/'data/extracted/rr-catalog.json').read_text(encoding='utf-8'))
+    result=[];n=0
+    for pack in data['packs']:
+        if pack['pack']=='BT':continue # battle keeps the retail arenas for now
+        for cup in pack['cups']:
+            for slot,t in enumerate(cup['tracks']):
+                i=RR_FIRST_ID+n;n+=1
+                result.append({'id':i,'enum':t['file'],'name':t['name'],'kind':'race','cup':f"{'Retro' if pack['pack']=='RT' else 'Custom'} Cup {cup['index']+1}",'slot':slot,
+                               'archive':f"Race/Course/{t['file']}.szs",'key':t['file'],'prefix':f'course_{i}','run_as':t['slot'],'music':t['music'],
+                               # selected: in --rr-cups; cooked: selected and not failed to import (then not available)
+                               'selected':t['cooked'],'cooked':t['cooked'] and not import_failed(i)})
+    result+=[c for c in retail_courses() if c['kind']=='arena']
+    for index,c in enumerate(result):c['index']=index
+    return result
+
+def courses(cooked_only=True):
+    """Every course in menu order; cooked_only drops Retro Rewind tracks outside --rr-cups."""
+    result=rr_courses() if os.environ.get('MKW_RR') else retail_courses()
+    return [c for c in result if c['cooked'] or not cooked_only]
+
+def write_header(imported):
+    """course_catalog.hpp (generated()) for the Retro Rewind edition. imported: ids
+    that cooked; every other track is listed as unsupported (not available)."""
+    def s(text):return '"'+text.replace('\\','\\\\').replace('"','\\"')+'"'
+    lines=[]
+    for c in courses(False):
+        sky='models/coconut_sky.list' if c['id']==5 else f"models/{c['prefix']}_sky.list"
+        lines.append(f"    {{{s(c['name'])},Kinoko::Course({c['run_as']}),{s(c['archive'])},{s('models/'+c['prefix']+'.list')},{s(sky)},{s(c['cup'])},"
+                     f"{'true' if c['id'] in imported else 'false'},false,{c['id']},{c.get('music',c['run_as'])}}},")
+    races=sum(c['kind']=='race' for c in courses(False))
+    generated('course_catalog.hpp',write=True).write_text(f"""// Generated by tools/course_catalog.py for the Retro Rewind edition: do not edit.
+#pragma once
+#include "mkw/course_choice.hpp"
+namespace mkw {{
+inline constexpr CourseChoice Courses[]={{
+{chr(10).join(lines)}
+}};
+// The ten arenas follow the races, in battle cup order.
+inline constexpr unsigned RaceCourseCount={races};
+inline constexpr unsigned CourseCount=sizeof(Courses)/sizeof(Courses[0]);
+}} // namespace mkw
+""",encoding='utf-8')
+
 if __name__=='__main__':print(json.dumps({'version':1,'courses':courses()},indent=2))

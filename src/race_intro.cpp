@@ -1,7 +1,9 @@
 #include <mkw/race_intro.hpp>
+#include <mkw/course_choice.hpp>
 #include <game/field/RailInterpolator.hh>
 #include <game/field/RailManager.hh>
 #include <game/system/CourseMap.hh>
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <utility>
@@ -48,7 +50,53 @@ bool RaceIntro::load(const void* data,std::size_t size){
   if(first<cameras_.size())opening_=int(first);
   break;
  }
+ if(RetroRewindEdition&&opening_>=0)repairIntro(k,size);
  return opening_>=0;
+}
+
+// Some custom tracks' opening cameras were authored for another version of the
+// course: their paths run under it (SNES Ghost Valley 1, 11000 units below its
+// start). Those shots become glides 2500 units above stretches of the CPU route
+// (ENPT), keeping each shot's length and field of view. Retail never trips this.
+void RaceIntro::repairIntro(const std::uint8_t* k,std::size_t size){
+ const unsigned sections=be16(k+8),header=be16(k+0xa);
+ auto section=[&](const char* tag,std::size_t stride,unsigned& count)->const std::uint8_t*{
+  for(unsigned i=0;i<sections;++i){
+   const std::size_t at=std::size_t(header)+be32(k+0x10+i*4);
+   if(at+8<=size&&!std::memcmp(k+at,tag,4)){count=be16(k+at+4);return stride&&at+8+count*stride>size?nullptr:k+at+8;}
+  }
+  count=0;return nullptr;
+ };
+ unsigned starts=0,enemies=0,routes=0;
+ const auto* start=section("KTPT",0x1c,starts);const auto* enemy=section("ENPT",0x14,enemies);const auto* poti=section("POTI",0,routes);
+ if(!start||!starts||!enemy||enemies<16||!poti)return;
+ // POTI: per route a point count, two settings, then 16-byte points.
+ std::vector<float> lowest(routes,1e30f);
+ {const std::uint8_t* p=poti;
+  for(unsigned r=0;r<routes;++r){
+   if(std::size_t(p+4-k)>size)return;
+   const unsigned points=be16(p);p+=4;
+   if(std::size_t(p+points*16-k)>size)return;
+   for(unsigned i=0;i<points;++i)lowest[r]=std::min(lowest[r],bef(p+i*16+4));
+   p+=points*16;
+  }}
+ const float startY=bef(start+4);
+ std::vector<int> chain;bool under=false;
+ for(int i=opening_;i>=0&&std::size_t(i)<cameras_.size()&&chain.size()<cameras_.size();){
+  chain.push_back(i);
+  if(cameras_[i].route<routes&&lowest[cameras_[i].route]<startY-1000.f)under=true;
+  i=cameras_[i].next<cameras_.size()?int(cameras_[i].next):-1;
+ }
+ if(!under)return;
+ auto point=[&](unsigned i){return bev(enemy+(i%enemies)*0x14);};
+ const Vec3 up{0,2500,0};
+ for(std::size_t n=0;n<chain.size();++n){
+  auto& c=cameras_[chain[n]];
+  const unsigned first=unsigned((n+1)*enemies/(chain.size()+1)),span=std::max(4u,enemies/10);
+  c.glide=true;c.type=0;c.route=0xff;
+  c.position=point(first)+up;c.eyeEnd=point(first+span)+up;
+  c.viewStart=point(first+span/2);c.viewEnd=point(first+span+span/2);
+ }
 }
 
 unsigned RaceIntro::frames()const{
@@ -96,6 +144,14 @@ void RaceIntro::begin(int index){
 void RaceIntro::step(){
  if(!active_)return;
  const auto& c=cameras_[current_];
+ if(c.glide){
+  const float t=c.time>0?std::min(elapsed_/c.time,1.f):1.f;
+  eye_=c.position+(c.eyeEnd-c.position)*t;target_=c.viewStart+(c.viewEnd-c.viewStart)*t;
+  fov_=appliedFov_=c.fovStart+(c.fovEnd-c.fovStart)*t;
+  elapsed_+=1.f;
+  if(c.time<=elapsed_){if(c.next<cameras_.size()&&++shots_<64)begin(c.next);else stop();}
+  return;
+ }
  // Shot position. Type 5 (0x805ADCB0): velocity is the route points' first
  // setting, lerped by segment progress, then the rail advances. Type 4
  // (0x805ADAE4) holds its authored position.

@@ -41,7 +41,11 @@ private:
  struct Camera {
   std::uint8_t type=0,next=0xff,route=0xff;std::uint16_t pathSpeed=0,fovSpeed=0,viewSpeed=0;
   Vec3 position,viewStart,viewEnd;float fovStart=0,fovEnd=0,time=0;
+  // A generated shot (repairIntro): the eye glides position->eyeEnd, the view viewStart->viewEnd.
+  bool glide=false;Vec3 eyeEnd;
  };
+ // Retro Rewind tracks whose opening cameras lie under the course: shots along its CPU route.
+ void repairIntro(const std::uint8_t* kmp,std::size_t size);
  void begin(int index);
  std::vector<Camera> cameras_;
  int opening_=-1,current_=-1;unsigned shots_=0;

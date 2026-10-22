@@ -17,6 +17,9 @@ for name in ('kinoko','noclip','gclib','citro3d','libctru'):
    if subprocess.run(['git','-C',str(dest),'apply','--reverse','--check',patch],capture_output=True).returncode:
     print('kinoko: applying the updated port patch')
     subprocess.run(['git','-C',str(dest),'checkout','--','.'],check=True)
+    # The patch also adds files: remove the old copies before applying the new one.
+    for line in Path(patch).read_text(encoding='utf-8').splitlines():
+     if line.startswith('+++ b/') and (dest/line[6:]).is_file() and subprocess.run(['git','-C',str(dest),'ls-files','--error-unmatch',line[6:]],capture_output=True).returncode:(dest/line[6:]).unlink()
     subprocess.run(['git','-C',str(dest),'apply',patch],check=True)
   continue
  subprocess.run(['git','clone','--no-checkout',entry['url'],str(dest)],check=True)

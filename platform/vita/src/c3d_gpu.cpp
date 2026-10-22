@@ -39,7 +39,7 @@ bool C3D_IVUnifDirty[2][C3D_IVUNIF_COUNT];
 bool C3D_BoolUnifsDirty[2];
 // Newlib heap for the game (Kinoko's arena, menus, sound tables). The GPU
 // pools (LINEAR, textures, render targets) take most of the rest at vglInit.
-unsigned int _newlib_heap_size_user = 128 * 1024 * 1024;
+unsigned int _newlib_heap_size_user = 160 * 1024 * 1024; // incl. Kinoko's 48 MiB (MEMORY_SPACE_SIZE)
 unsigned int sceUserMainThreadStackSize = 1024 * 1024;
 }
 
@@ -850,16 +850,16 @@ void initDisplay() {
 	// The Vita shows no console: printf output (including this layer's
 	// shader and status lines) goes to a log beside the game files.
 	mkdir("ux0:data", 0777);
-	mkdir("ux0:data/mkw", 0777);
-	if (std::freopen("ux0:data/mkw/vita.log", "w", stdout)) std::setvbuf(stdout, nullptr, _IOLBF, 0);
+	mkdir(MKW_DATA_ROOT, 0777);
+	if (std::freopen(MKW_DATA_ROOT "/vita.log", "w", stdout)) std::setvbuf(stdout, nullptr, _IOLBF, 0);
 	initMorton();
 	LightLock_Init(&textureLock);
 	LightLock_Init(&writtenLock);
 	auto marker = [](const char* path) { FILE* f = std::fopen(path, "rb"); if (f) std::fclose(f); return f != nullptr; };
-	gpuTrace = marker("ux0:data/mkw/gpu-trace.txt");
-	gpuSync = marker("ux0:data/mkw/gpu-sync.txt");
-	profile = marker("ux0:data/mkw/profile.txt");
-	if (FILE* f = std::fopen("ux0:data/mkw/quality.txt", "rb")) {
+	gpuTrace = marker(MKW_DATA_ROOT "/gpu-trace.txt");
+	gpuSync = marker(MKW_DATA_ROOT "/gpu-sync.txt");
+	profile = marker(MKW_DATA_ROOT "/profile.txt");
+	if (FILE* f = std::fopen(MKW_DATA_ROOT "/quality.txt", "rb")) {
 		char line[128];
 		float value = 0;
 		while (std::fgets(line, sizeof line, f))
@@ -1217,16 +1217,19 @@ void C3D_FrameEnd(u8) {
 		if (stats.lastPresentUs) {
 			stats.frameUs += now - stats.lastPresentUs;
 			const uint64_t frame = now - stats.lastPresentUs;
+#ifndef MKW_RELEASE // each report is a memory card write
 			if (frame > 70000)
 				std::printf("c3dvita: slow frame %.1f ms: %u texture uploads (%u converted while drawing, %.1f ms), %u shader programs (%.1f ms)\n",
 					double(frame) / 1e3, uploadStats.uploads, uploadStats.converted, double(uploadStats.us) / 1e3,
 					c3dvita::programsCreated, double(c3dvita::programUs) / 1e3);
+#endif
 		}
 		uploadStats = {};
 		c3dvita::programsCreated = 0;
 		c3dvita::programUs = 0;
 		stats.lastPresentUs = now;
 		if (++stats.frames == 300) {
+#ifndef MKW_RELEASE
 			std::printf("c3dvita: %.1f fps, %u draws/frame, %u copies/frame (%u KiB), sync wait %.2f ms, draw thread %.2f ms, present %.2f ms\n",
 				stats.frameUs ? 299e6 / double(stats.frameUs) : 0.0, stats.draws / 300, stats.copies / 300,
 				unsigned(stats.copiedBytes / 300 / 1024), double(stats.beginWaitUs) / 300e3, double(stats.workUs) / 300e3,
@@ -1238,6 +1241,7 @@ void C3D_FrameEnd(u8) {
 				std::printf("c3dvita:   gpu tail %.2f ms; per frame: uniforms %.2f, textures %.2f, state %.2f, attributes %.2f, vitaGL draw %.2f ms\n",
 					double(stats.gpuTailUs) / 1e3, double(stats.uniformUs) / 300e3, double(stats.textureUs) / 300e3,
 					double(stats.stateUs) / 300e3, double(stats.attributeUs) / 300e3, double(stats.drawUs) / 300e3);
+#endif
 			const uint64_t keep = stats.lastPresentUs;
 			stats = {};
 			stats.lastPresentUs = keep;

@@ -10,12 +10,21 @@ It isn't an emulator. The game runs natively on the Vita:
 - **Game code:** menus, races, items and the AI are MKW-3DS's native code.
 - **3DS layer:** a small layer underneath that code provides the 3DS system and graphics functions it expects, implemented with the Vita's own APIs and [vitaGL](https://github.com/Rinnegatamante/vitaGL).
 
-This repository contains **no Nintendo files**. You build the game files
-yourself, on your own computer, from your own Mario Kart Wii disc.
+This repository contains **no Nintendo or Retro Rewind files**. You build the
+game files yourself, on your own computer, from your own Mario Kart Wii disc.
 
-> **Status: playable.** Grand Prix (with Mirror and the award ceremony), VS,
-> Team VS, Time Trials and Battle all run on real hardware, with sound, in
-> 16:9. Make a license and unlock characters, vehicles, cups and Mirror as on
+There are **two editions**, which install side by side:
+
+| | **Mario Kart Wii** | **MKW Retro Rewind** |
+|---|---|---|
+| VPK in the releases | `mkw.vpk` | `mkw-retro-rewind.vpk` |
+| Built from | your disc | your disc and your own [Retro Rewind](#retro-rewind-edition) install |
+| Game files on the Vita | `ux0:data/mkw` | `ux0:data/mkwrr` |
+| Saves, settings and logs | `ux0:data/mkw` | `ux0:data/mkwrr` |
+
+> **Status: playable.** Grand Prix (with Mirror), VS (both with the award
+> ceremony), Team VS, Time Trials and Battle all run on real hardware, with
+> sound, in 16:9. Make a license and unlock characters, vehicles, cups and Mirror as on
 > the Wii, or unlock everything in [Settings](#settings).
 >
 > **Frame rate by preset:** a steady **60 FPS** in Performance, **45-60 FPS**
@@ -26,10 +35,12 @@ yourself, on your own computer, from your own Mario Kart Wii disc.
 
 ## What works
 
+The Mario Kart Wii edition (for the Retro Rewind edition, see [below](#retro-rewind-edition)):
+
 | | |
 |---|---|
 | Menus, Grand Prix (50/100/150cc and Mirror), VS, Team VS, Time Trials | ✅ |
-| Grand Prix award ceremony and final standings | ✅ |
+| Award ceremony after Grand Prix and VS, and final standings | ✅ |
 | All 24 drivers and their karts and bikes | ✅ |
 | Licenses: four named save slots, each with its own unlocks, best times and ghosts | ✅ |
 | Unlocks as on the Wii: characters, vehicles, cups, Mirror and the karts/bikes switch | ✅ |
@@ -49,7 +60,7 @@ yourself, on your own computer, from your own Mario Kart Wii disc.
 **To play:**
 - A PS Vita or PS TV with [HENkaku / Ensō](https://vita.hacks.guide) and VitaShell.
 - `ur0:data/libshacccg.suprx`, the Vita's shader compiler. Extract it once with [ShaRKF00D](https://github.com/Rinnegatamante/ShaRKF00D).
-- About **3 GB** free on `ux0:` for the game files.
+- About **2 GB** free on `ux0:` for the game files.
 
 **To build** (see [BUILDING.md](BUILDING.md)):
 - **Mario Kart Wii (USA)**, game ID `RMCE01`, dumped as `.iso` or `.wbfs`. Convert RVZ or NKit dumps to ISO in Dolphin first. Other regions aren't supported yet.
@@ -67,6 +78,8 @@ yourself, on your own computer, from your own Mario Kart Wii disc.
 
 ## Quick start
 
+For the Retro Rewind edition, see [its quick start](#retro-rewind-edition).
+
 1. **Get the VPK:** download `mkw.vpk` from the [latest release](https://github.com/boomannotjeff/mkwiita/releases/latest).
 2. **Build the game files** from your disc: double-click **`Build Game Files.bat`**, drag your disc image into the window and press Enter. The first build takes 30–60 minutes.
    Use the source code of the same release as your VPK (the release page has it as a zip), so the game files match the program.
@@ -77,12 +90,60 @@ yourself, on your own computer, from your own Mario Kart Wii disc.
 5. Launch **Mario Kart Wii** from the LiveArea and pick an empty license slot to make your license: the
    Vita's keyboard asks for its name.
 
-**Updating from 1.2.0:** build the game files again from the 1.3.0 source and copy them over (the VPK and the
-game files must come from the same release). Your best times and ghosts move into the first license you
-create.
+**Updating from 1.3.0:** build the game files again from the 1.4.0 source (the VPK and the game files must
+come from the same release). On the Vita, delete the old `.pak` files and the `models` folder in `ux0:data/mkw/`
+first, then copy the new files. Your licenses, times and ghosts stay.
 
 **Please don't share the game files** (`data/mkw`): they contain Nintendo's
 game data. The VPK itself is only the program; it holds no game data.
+
+## Retro Rewind edition
+
+**MKW Retro Rewind** is a separate app made from your own copy of the
+Retro Rewind 6 Wii mod. It plays its tracks, music, character skins and
+menus on this port's engine. The build reads them from your Retro Rewind folder; nothing from
+Retro Rewind is in this repository or in the VPK.
+
+![Retro Rewind on the Vita: a Retro Rewind track with a character skin](site/pictures/rr-skins.png)
+
+| | |
+|---|---|
+| All 79 cups: 44 Retro and 35 Custom, with Retro Rewind's cup pages and coloured track names | ✅ |
+| 310 of the 316 tracks, each with its own music and lap count | ✅ |
+| 200cc (after 150cc, in place of 50cc) and Mirror | ✅ |
+| Character skins: L/R on the character screen, with the preview (113 of Retro Rewind's 123) | ✅ |
+| Speedometer (SELECT) | ✅ |
+| Everything unlocked from the start, as in Retro Rewind | ✅ |
+| Retro Rewind menu entries for features this port doesn't have: shown, and say "Not available" | ➖ |
+| N64 Luigi Raceway, Shadow Woods, Lunar Lights, Kinoko Cave, Desert Creek, Nivurbia | ❌ "Not available" (don't convert yet) |
+| Retro Rewind's own gameplay rules and item changes, its battle arenas (the ten Wii arenas are used), track variants | ❌ Not yet |
+| Online | ❌ No |
+
+**What you need**, on top of [the usual](#what-you-need):
+- Retro Rewind 6 installed on your PC: the `RetroRewind6` folder, as Dolphin or WheelWizard
+  installs it (for example `%APPDATA%\Dolphin Emulator\Load\Riivolution\WheelWizard\RetroRewind6`).
+  Built and tested with 6.13.3.
+- About **45 GB** free on the PC, and a few hours for the first build.
+- About **8 GB** free on `ux0:`.
+
+**Quick start:**
+1. Download `mkw-retro-rewind.vpk` from the [latest release](https://github.com/boomannotjeff/mkwiita/releases/latest).
+2. Unzip the same release's source code into its **own folder**, not the one you use for the normal edition:
+   one folder builds one edition, and the build stops if you mix them.
+3. Double-click **`Build Retro Rewind Game Files.bat`**, drag in your disc image, then your
+   `RetroRewind6` folder (or just press Enter to use Dolphin's).
+
+   *Building the VPK yourself?* Use **`Build MKW Retro Rewind Vita.bat`** instead (needs VitaSDK);
+   it makes `build\vita\mkw-retro-rewind.vpk`, the Retro Rewind app.
+4. Install the VPK with VitaShell and copy the **contents** of `build\vita\data\mkwrr\` to
+   `ux0:data/mkwrr/`. Most of it is a few large `.pak` files, so USB or FTP both work well.
+5. Launch **MKW Retro Rewind** from the LiveArea.
+
+Settings, logs and troubleshooting work as below, with `ux0:data/mkwrr` in place of `ux0:data/mkw`.
+
+| | |
+|---|---|
+| ![A custom track with name tags](site/pictures/rr-custom-track.png) | ![A retro track in first place](site/pictures/rr-retro-track.png) |
 
 ## Controls
 
@@ -140,9 +201,11 @@ still edit by hand. The values in use are written to `ux0:data/mkw/vita.log` at 
 - **Black screen after the vitaGL logo:** `libshacccg.suprx` is missing (see above), or the game files aren't in `ux0:data/mkw/`.
 - **Short freezes on the first launch:** shaders compiling. They're saved to `ux0:data/mkw/shaders/` and loaded at start-up after that.
 - **Something looks wrong after an update:** delete `ux0:data/mkw/shaders/` to rebuild the shader cache.
+- **Black menus or missing textures after an update:** a `.pak` file wasn't fully replaced. Delete the `.pak` files on the Vita, copy them again and check their sizes match the ones in `build\vita\data\mkw\`.
 - **Settings button does nothing:** close the game first (hold the LiveArea page and pull it away), then tap it.
 - **Saves:** licenses and unlocks are in `ux0:data/mkw/save.bin`, ghosts in `ux0:data/mkw/ghosts/`.
 - **Logs:** `ux0:data/mkw/vita.log` (graphics, frame rate) and `ux0:data/mkw/runtime.log` (game). Attach both when reporting a problem.
+- **Retro Rewind edition:** the same files are in `ux0:data/mkwrr/`. A track that crashes: attach both logs and say which track it was.
 - **Problems building assets:** Try to use python 3.14.5 and make sure you have Visual C++ 14.0 or later.
 
 ## How it works
@@ -166,6 +229,7 @@ Details: [docs/VITA_PORT.md](docs/VITA_PORT.md).
 - [Azahar](https://github.com/azahar-emu/azahar): reference for the 3DS GPU's texture and combiner behaviour
 - [noclip.website](https://github.com/magcius/noclip.website) (MIT) and [gclib](https://github.com/LagoLunatic/gclib) by LagoLunatic (MIT): disc and model tools
 - [ogws](https://github.com/doldecomp/ogws) and [mkw](https://github.com/snailspeed3/mkw) decompilations (CC0): references
+- **The Retro Rewind team:** Retro Rewind, whose tracks, music, skins and menus the Retro Rewind edition is built from (from your own install)
 
 Mario Kart Wii is © Nintendo. This is an unofficial fan project with no
-affiliation with Nintendo or Sony. See [NOTICE](NOTICE).
+affiliation with Nintendo, Sony or the Retro Rewind team. See [NOTICE](NOTICE).

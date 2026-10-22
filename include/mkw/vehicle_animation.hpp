@@ -1,6 +1,7 @@
 #pragma once
 #include "mkw/math.hpp"
 #include "mkw/wheel_motion.hpp"
+#include "mkw/luma_motion.hpp"
 #include <citro3d.h>
 #include <algorithm>
 #include <array>
@@ -35,6 +36,11 @@ public:
     // contains steering, so the attachment must omit the same steering angle.
     C3D_Mtx accessory(const char* name,bool sourceAnimated=false,unsigned instance=0) const;
     bool finite() const;
+    // Rosalina's Luma (driver 23, or her biker outfit 47): stepped with the kart.
+    bool hasLuma() const {return luma_;}
+    const LumaMotion& lumaMotion() const {return lumaMotion_;}
+    unsigned lumaFrame() const {return lumaFrame_;}
+    Vec3 visualScale() const {return kartScale_;}
     static float advanceRoll(float phase,float signedDistance,float radius);
 private:
     void readParameters(unsigned vehicle);
@@ -57,7 +63,9 @@ private:
     std::array<float,4> roll_{},travel_{},radii_{};
     std::array<float,84> display_{};
     unsigned count_=0,vehicle_=~0u;
-    bool bike_=false;
+    bool bike_=false,luma_=false;
+    LumaMotion lumaMotion_{};
+    unsigned lumaFrame_=0;
     mutable float driveFrame_=15;
     Vec3 displayVec(unsigned offset) const;
 };

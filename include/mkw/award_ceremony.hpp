@@ -37,6 +37,9 @@ public:
         // standings' top line: 0 Balloon Battle, 1 Coin Runners, 2 Team VS.
         bool team=false;
         unsigned winner=0,mode=0;
+        // Solo VS (this port's addition; retail has no VS ceremony): the GP podium
+        // and run without the cup's trophy, cup line and rank grade.
+        bool vs=false;
     };
     ~AwardCeremony();
     // Main thread, render thread idle and not deferred. On false the scene is

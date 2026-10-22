@@ -28,7 +28,9 @@ def main():
     output=OUT/'textures';output.mkdir(parents=True,exist_ok=True)
     selected={}
     for model in ('psea1sand','psea2dark','psea3nami','psea4tex','psea5spc'):
-        data=json.loads((ASSETS/f'models/obj16_psea__{model}-receipt.json').read_text())
+        path=ASSETS/f'models/obj16_psea__{model}-receipt.json'
+        if not path.is_file():continue # GCN Peach Beach is not in the Retro Rewind edition
+        data=json.loads(path.read_text())
         textures={t['source']:t['name'] for t in data['textures']}
         for shape in data['materials']:
             for sampler in shape['sourceMaterial']['samplers']:

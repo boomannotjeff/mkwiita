@@ -158,6 +158,13 @@ void RaceSound::begin(const Setup& s) {
  auto& sys = SoundSystem::instance();
  if (active_) quit();
  setup_ = s;
+ if (setup_.music == ~0u) setup_.music = setup_.course;
+ if (setup_.music < 0x2a) {
+  // Retro Rewind: the track's BRSTM plays as the music slot's streams (no final-lap file: the same music).
+  auto& sys = SoundSystem::instance();
+  sys.overrideStream(CourseStream[setup_.music], s.musicFile);
+  sys.overrideStream(CourseStream[setup_.music] + 1u, s.finalLapFile ? s.finalLapFile : s.musicFile);
+ }
  budget_ = {};
  if (!sys.available()) return;
  active_ = true; paused_ = false; state_ = 0; countdown_ = 0; tick_ = 0; maxLap_ = 1; finished_ = false; rank_ = 1;
@@ -259,7 +266,8 @@ void RaceSound::planScene() {
  if (course < 0x2a) resident.push_back(course + 0xf);
  for (unsigned i = 0; i < s.racers; ++i) if (s.racer[i].local && s.racer[i].character < 24) resident.push_back(std::uint32_t(VoiceGroup[s.racer[i].character]));
  // The course stream and the next one (prepared) play from block rings.
- const std::uint32_t stream = course < 0x2a ? std::max(sys.streamBytes(CourseStream[course]), sys.streamBytes(CourseStream[course] + 1)) : 0;
+ const unsigned music = setup_.music;
+ const std::uint32_t stream = music < 0x2a ? std::max(sys.streamBytes(CourseStream[music]), sys.streamBytes(CourseStream[music] + 1)) : 0;
  const std::uint32_t streams = std::max<std::uint32_t>(stream, 64u * 1024) * 2;
  const std::uint32_t free = std::uint32_t(linearSpaceFree());
  budget_.linearFree = free;
@@ -309,7 +317,7 @@ void RaceSound::setRaceState(int n) {
  }
  if (bgm_.activeSound() != id::W_BGM_TITLE) bgm_.stop(0);
  const unsigned course = setup_.course;
- const std::uint32_t stream = course < 0x2a ? CourseStream[course] : None;
+ const std::uint32_t stream = setup_.music < 0x2a ? CourseStream[setup_.music] : None;
  auto rampPlayers = [&]() {
   // Players 2-6 silent, then RaceMgr+0x54 brings them to 1.0 over 120 frames.
   race_.value = 0; race_.set(1.0f, 0x78);
@@ -475,7 +483,7 @@ void RaceSound::step(const Frame& f, RaceAudioFrame* actors) {
  // Bounded release diagnostics for silent race actors; no per-frame file I/O.
  if (tick_ == 300 || tick_ == 900 || tick_ == 1800) {
   const auto st = sys.stats();
-  if (FILE* log = std::fopen("ux0:data/mkw/audio-race-status.txt", "a")) {
+  if (FILE* log = std::fopen(MKW_DATA_ROOT "/audio-race-status.txt", "a")) {
    std::fprintf(log, "tick=%u course=%u ready=%d actor_frames=%lu actor_sounds=%lu voices=%lu missing=%lu failed=%lu last=%lu/%lu/%lu cache=%lu/%lu waves=%lu linear=%lu\n",
     tick_, setup_.course, int(sys.sceneReady()), (unsigned long)layer_.framesUsed.load(),
     (unsigned long)layer_.actorSounds.load(), (unsigned long)st.voices, (unsigned long)st.missing,

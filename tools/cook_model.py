@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Convert pinned BRRES parser output into bounded, partitioned Citro3D meshes."""
-import argparse,hashlib,io,json,math,re,os,struct,subprocess,sys
+import argparse,hashlib,io,json,math,re,os,shutil,struct,subprocess,sys,threading
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/'vendor/gclib'))
@@ -10,6 +10,22 @@ from PIL import Image
 from gx_material import material_state,retail_lighting,GMDL_SUBMESH
 from devkitpro import tool
 WATER_WORDS={'water','sea','river','fountain','lake'}
+# Most textures recur across karts, courses and menus: each distinct encode runs once.
+TEX3DS_CACHE=ROOT/'build/tex3ds-cache'
+def encode_texture(png,im,args):
+ exe=tool('tex3ds');target=png.with_suffix('.t3x')
+ key=hashlib.sha256(repr((args,im.size,os.path.getsize(exe))).encode()+im.tobytes()).hexdigest()
+ cached=TEX3DS_CACHE/f'{key}.t3x'
+ if cached.is_file():shutil.copyfile(cached,target);return
+ subprocess.run([str(exe),*args,'-o',str(target),str(png)],check=True,stdout=subprocess.DEVNULL)
+ # Parallel cook jobs (processes and threads) may encode the same texture: publish atomically.
+ TEX3DS_CACHE.mkdir(parents=True,exist_ok=True);temporary=cached.with_suffix(f'.{os.getpid()}-{threading.get_ident()}.tmp')
+ shutil.copyfile(target,temporary)
+ try:os.replace(temporary,cached)
+ except PermissionError:
+  # Windows: another job published the same bytes and is reading them now.
+  temporary.unlink(missing_ok=True)
+  if not cached.is_file():raise
 # Lower-case words of a source name, split at underscores, digits and case
 # changes: 'TR_houseALL' -> tr, house, all; 'water0_HIG' -> water, hig.
 def name_words(name):return {w.lower() for w in re.findall(r'[A-Z]+(?![a-z])|[A-Z]?[a-z]+',name)}
@@ -37,7 +53,7 @@ def cook(source,out,prefix,max_texture=256,preserve_vertices=False,reuse_texture
   # and sample a smaller level.
   mips=['-m','box'] if os.environ.get('MKW_MIPMAPS')=='1' and t.get('mipCount',1)>1 else []
   if not reuse_textures:
-   subprocess.run([str(tool('tex3ds')),'-f',fmt,'-q','high',*mips,'-z','none','-o',str(png.with_suffix('.t3x')),str(png)],check=True,stdout=subprocess.DEVNULL)
+   encode_texture(png,im,['-f',fmt,'-q','high',*mips,'-z','none'])
   elif not png.with_suffix('.t3x').is_file():raise ValueError('Missing reusable texture: '+str(png))
   audits.append({'source':t['name'],'name':name,'size':size,'alpha':alpha})
  # Materials tools/export_brres.ts could not translate (its receipt's fallbacks).

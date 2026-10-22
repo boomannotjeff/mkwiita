@@ -1,5 +1,6 @@
 #pragma once
 #include <cstddef>
+#include <cstdio>
 #include <cstdint>
 #include <vector>
 
@@ -21,5 +22,7 @@ long size(const char* path);
 bool readInto(const char* path,void* destination,size_t bytes);
 // Reads `bytes` starting `offset` bytes into the asset; false past its end.
 bool readRange(const char* path,size_t offset,void* destination,size_t bytes);
+// The asset as a read-only stdio stream (fread, fscanf, fseek), or null if absent.
+std::FILE* openFile(const char* path);
 }
 }

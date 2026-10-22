@@ -1,3 +1,18 @@
+diff --git a/include/Common.hh b/include/Common.hh
+index 4be2ae5..5d4fd1b 100644
+--- a/include/Common.hh
++++ b/include/Common.hh
+@@ -418,7 +418,9 @@ static inline constexpr u32 f2u(f32 val) {
+ }
+ 
+ // The size of memory blocks that are allocated for game heap space.
+-static constexpr size_t MEMORY_SPACE_SIZE = 0x1000000;
++// Port: 48 MiB, not 16: a Retro Rewind course loads its compressed and unpacked
++// archive at once (Wii U Mute City: 6 + 8 MiB; Z75, tVV: up to 9 + 12 MiB).
++static constexpr size_t MEMORY_SPACE_SIZE = 0x3000000;
+ 
+ #ifdef BUILD_DEBUG
+ static constexpr auto DEFAULT_OPT = Abstract::Memory::MEMiHeapHead::OptFlag().setBit(
 diff --git a/include/Logger.hh b/include/Logger.hh
 index eb8ee04..c5e3fe0 100644
 --- a/include/Logger.hh
@@ -704,6 +719,19 @@ index fe20a13..ec11cd5 100644
  private:
      [[nodiscard]] f32 calcDirSwitchVelocity(u32 t) const;
  
+diff --git a/source/game/field/obj/ObjectBird.cc b/source/game/field/obj/ObjectBird.cc
+index dbb08e8..5a736e2 100644
+--- a/source/game/field/obj/ObjectBird.cc
++++ b/source/game/field/obj/ObjectBird.cc
+@@ -32,7 +32,7 @@ ObjectBird::~ObjectBird() = default;
+ void ObjectBird::calc() {
+     constexpr f32 MIN_SPACING = 300.0f;
+ 
+-    for (u32 i = 0; i < m_followers.size() - 1; ++i) {
++    for (u32 i = 0; i + 1 < m_followers.size(); ++i) { // Port: safe for an empty flock (custom tracks)
+         const EGG::Vector3f &firstPos = m_followers[i]->pos();
+ 
+         for (u32 j = i + 1; j < m_followers.size(); ++j) {
 diff --git a/source/game/field/obj/ObjectBulldozer.cc b/source/game/field/obj/ObjectBulldozer.cc
 index f592e7f..4d8ae43 100644
 --- a/source/game/field/obj/ObjectBulldozer.cc
@@ -1399,7 +1427,7 @@ index 012ec51..20cc5cf 100644
      virtual bool checkCollision(ObjectCollisionBase *lhs, EGG::Vector3f &dist);
  
 diff --git a/source/game/field/obj/ObjectCow.cc b/source/game/field/obj/ObjectCow.cc
-index 1d1d81e..f0b06ac 100644
+index 1d1d81e..97104a8 100644
 --- a/source/game/field/obj/ObjectCow.cc
 +++ b/source/game/field/obj/ObjectCow.cc
 @@ -243,6 +243,11 @@ void ObjectCowLeader::calcRoam() {
@@ -1436,6 +1464,16 @@ index 1d1d81e..f0b06ac 100644
  }
  
  /// @addr{0x806BEB54}
+@@ -478,7 +491,8 @@ void ObjectCowHerd::calc() {
+ void ObjectCowHerd::checkIntraCollision() {
+     constexpr f32 WIDTH = 400.0f;
+ 
+-    for (u32 i = 0; i < m_followers.size() - 1; ++i) {
++    // Port: i + 1 < size, not i < size - 1: a Retro Rewind herd (3DS Daisy Hills) can have no followers.
++    for (u32 i = 0; i + 1 < m_followers.size(); ++i) {
+         auto *iFollower = m_followers[i];
+ 
+         for (u32 j = i + 1; j < m_followers.size(); ++j) {
 diff --git a/source/game/field/obj/ObjectCow.hh b/source/game/field/obj/ObjectCow.hh
 index 1d29e4b..6487a48 100644
 --- a/source/game/field/obj/ObjectCow.hh
@@ -1841,9 +1879,18 @@ index d447748..f025476 100644
  
      void calcErupted();
 diff --git a/source/game/field/obj/ObjectHanachan.cc b/source/game/field/obj/ObjectHanachan.cc
-index 15870f0..0538007 100644
+index 15870f0..a43137d 100644
 --- a/source/game/field/obj/ObjectHanachan.cc
 +++ b/source/game/field/obj/ObjectHanachan.cc
+@@ -39,7 +39,7 @@ void HanachanChainManager::calc() {
+         }
+     }
+ 
+-    for (size_t i = 0; i < m_links.size() - 1; ++i) {
++    for (size_t i = 0; i + 1 < m_links.size(); ++i) { // Port: safe with no links (custom tracks)
+         EGG::Vector3f delta = m_links[i].pos() - m_links[i + 1].pos();
+         f32 len = m_links[i].linkLen();
+ 
 @@ -186,6 +186,11 @@ void ObjectHanachan::calcWalk() {
      calcRailAlignmentMotion();
      m_chain.calc();
@@ -4480,7 +4527,7 @@ index 9d706df..4213ce0 100644
      m_timer = 0;
      m_phase = 0;
 diff --git a/source/game/kart/KartCollide.cc b/source/game/kart/KartCollide.cc
-index 5ac1c77..51ce8fe 100644
+index 5ac1c77..1a2375e 100644
 --- a/source/game/kart/KartCollide.cc
 +++ b/source/game/kart/KartCollide.cc
 @@ -1,13 +1,18 @@
@@ -4502,7 +4549,7 @@ index 5ac1c77..51ce8fe 100644
  
  #include <egg/math/BoundBox.hh>
  #include <egg/math/Math.hh>
-@@ -40,6 +45,283 @@ void KartCollide::init() {
+@@ -40,6 +45,294 @@ void KartCollide::init() {
      m_poleAngVelTimer = 0;
      m_poleYaw = 0.0f;
      m_colPerpendicularity = 0.0f;
@@ -4667,6 +4714,17 @@ index 5ac1c77..51ce8fe 100644
 +            } else if (selfMega && !otherMega && otherStatus.offBit(eStatus::Crushed)) {
 +                react(other, self, normal, Action::UNK_13, false);
 +                bump = false;
++            } else {
++                // A racer shrunk by lightning is pressed flat by a full-size one (short press).
++                const bool selfShocked = selfStatus.onBit(eStatus::Shocked);
++                const bool otherShocked = otherStatus.onBit(eStatus::Shocked);
++                if (selfShocked && !otherShocked && selfStatus.offBit(eStatus::Crushed)) {
++                    react(self, other, -normal, Action::UNK_14, false);
++                    bump = false;
++                } else if (otherShocked && !selfShocked && otherStatus.offBit(eStatus::Crushed)) {
++                    react(other, self, normal, Action::UNK_14, false);
++                    bump = false;
++                }
 +            }
 +        }
 +    } else if (otherBullet && !selfStar) {
@@ -4786,7 +4844,7 @@ index 5ac1c77..51ce8fe 100644
  }
  
  /// @addr{0x805730D4}
-@@ -253,6 +535,11 @@ void KartCollide::calcBodyCollision(f32 totalScale, f32 sinkDepth, const EGG::Qu
+@@ -253,6 +546,11 @@ void KartCollide::calcBodyCollision(f32 totalScale, f32 sinkDepth, const EGG::Qu
                  if (colInfo.movingFloorDist > -std::numeric_limits<f32>::min()) {
                      collisionData.bHasRoadVel = true;
                      collisionData.roadVelocity = colInfo.roadVelocity;
@@ -4798,7 +4856,7 @@ index 5ac1c77..51ce8fe 100644
                  }
  
                  processBody(collisionData, hitbox, &colInfo, &maskOut);
-@@ -294,6 +581,8 @@ void KartCollide::calcFloorEffect() {
+@@ -294,6 +592,8 @@ void KartCollide::calcFloorEffect() {
              colDir->findClosestCollisionEntry(&mask, KCL_TYPE_BIT(COL_TYPE_SOLID_OOB));
          }
  
@@ -4807,7 +4865,7 @@ index 5ac1c77..51ce8fe 100644
          activateOob(true, &mask, false, false);
      }
  
-@@ -353,6 +642,16 @@ void KartCollide::calcTriggers(Field::KCLTypeMask *mask, const EGG::Vector3f &po
+@@ -353,6 +653,16 @@ void KartCollide::calcTriggers(Field::KCLTypeMask *mask, const EGG::Vector3f &po
  
  /// @addr{0x8056F510}
  void KartCollide::handleTriggers(Field::KCLTypeMask *mask) {
@@ -4824,7 +4882,7 @@ index 5ac1c77..51ce8fe 100644
      calcFallBoundary(mask, false);
      processCannon(mask);
  
-@@ -389,6 +688,11 @@ void KartCollide::calcFallBoundary(Field::KCLTypeMask *mask, bool shortBoundary)
+@@ -389,6 +699,11 @@ void KartCollide::calcFallBoundary(Field::KCLTypeMask *mask, bool shortBoundary)
      }
  
      if (!safe) {
@@ -4836,7 +4894,7 @@ index 5ac1c77..51ce8fe 100644
          activateOob(false, mask, false, false);
      }
  }
-@@ -415,16 +719,49 @@ void KartCollide::calcBeforeRespawn() {
+@@ -415,16 +730,49 @@ void KartCollide::calcBeforeRespawn() {
  }
  
  /// @addr{0x80573B00}
@@ -4887,7 +4945,7 @@ index 5ac1c77..51ce8fe 100644
      move()->initOob();
  
      m_respawnTimer = RESPAWN_TIME;
-@@ -484,6 +821,10 @@ void KartCollide::calcWheelCollision(u16 /*wheelIdx*/, CollisionGroup *hitboxGro
+@@ -484,6 +832,10 @@ void KartCollide::calcWheelCollision(u16 /*wheelIdx*/, CollisionGroup *hitboxGro
      if (colInfo.movingFloorDist > -std::numeric_limits<f32>::min()) {
          collisionData.bHasRoadVel = true;
          collisionData.roadVelocity = colInfo.roadVelocity;
@@ -4898,7 +4956,7 @@ index 5ac1c77..51ce8fe 100644
      }
  
      processWheel(collisionData, firstHitbox, &colInfo, &kclOut);
-@@ -572,6 +913,11 @@ void KartCollide::calcObjectCollision() {
+@@ -572,6 +924,11 @@ void KartCollide::calcObjectCollision() {
      for (size_t i = 0; i < collisionCount; ++i) {
          Reaction reaction = objectDirector->reaction(i);
          if (reaction != Reaction::None && reaction != Reaction::UNK_7) {
@@ -4910,7 +4968,7 @@ index 5ac1c77..51ce8fe 100644
              size_t handlerIdx = static_cast<std::underlying_type_t<Reaction>>(reaction);
              Action newAction = (this->*s_objectCollisionHandlers[handlerIdx])(i);
  
-@@ -835,11 +1181,21 @@ void KartCollide::applySomeFloorMoment(f32 down, f32 rate, CollisionGroup *hitbo
+@@ -835,11 +1192,21 @@ void KartCollide::applySomeFloorMoment(f32 down, f32 rate, CollisionGroup *hitbo
          return;
      }
  
@@ -6510,8 +6568,102 @@ index b323386..fe96dff 100644
      }
  }
  
+diff --git a/source/game/system/map/MapdataCheckPoint.cc b/source/game/system/map/MapdataCheckPoint.cc
+index aec1afc..7867992 100644
+--- a/source/game/system/map/MapdataCheckPoint.cc
++++ b/source/game/system/map/MapdataCheckPoint.cc
+@@ -41,7 +41,8 @@ void MapdataCheckPoint::initCheckpointLinks(MapdataCheckPointAccessor &accessor,
+         if (checkpath) {
+             m_prevCount = 0;
+ 
+-            for (auto [i, prevID] : std::views::enumerate(checkpath->prev())) {
++            for (size_t i = 0; i < checkpath->prev().size(); ++i) {
++                auto prevID = checkpath->prev()[i];
+                 if (prevID == 0xFF) {
+                     continue;
+                 }
+@@ -63,7 +64,8 @@ void MapdataCheckPoint::initCheckpointLinks(MapdataCheckPointAccessor &accessor,
+         if (checkpath) {
+             m_nextCount = 0;
+ 
+-            for (auto [i, nextID] : std::views::enumerate(checkpath->next())) {
++            for (size_t i = 0; i < checkpath->next().size(); ++i) {
++                auto nextID = checkpath->next()[i];
+                 if (nextID == 0xFF) {
+                     continue;
+                 }
+@@ -78,7 +80,8 @@ void MapdataCheckPoint::initCheckpointLinks(MapdataCheckPointAccessor &accessor,
+     }
+ 
+     // Form the checkpoint's quadrilateral(s)
+-    for (auto [i, next] : std::views::enumerate(m_nextPoints)) {
++    for (size_t i = 0; i < m_nextPoints.size(); ++i) {
++        auto &next = m_nextPoints[i];
+         if (i < m_nextCount) {
+             auto &nextLinked = m_nextPoints[i];
+             auto *nextPoint = nextLinked.checkpoint;
+diff --git a/source/game/system/map/MapdataCheckPoint.hh b/source/game/system/map/MapdataCheckPoint.hh
+index 6806608..8aa836e 100644
+--- a/source/game/system/map/MapdataCheckPoint.hh
++++ b/source/game/system/map/MapdataCheckPoint.hh
+@@ -89,6 +89,15 @@ public:
+         return m_dir;
+     }
+ 
++    /// The checkpoint line's ends (the road's edges), for map drawing.
++    [[nodiscard]] const EGG::Vector2f &left() const {
++        return m_left;
++    }
++
++    [[nodiscard]] const EGG::Vector2f &right() const {
++        return m_right;
++    }
++
+     [[nodiscard]] u16 id() const {
+         return m_id;
+     }
+diff --git a/source/game/system/map/MapdataJugemPoint.hh b/source/game/system/map/MapdataJugemPoint.hh
+index 7e4c5b1..aa2d565 100644
+--- a/source/game/system/map/MapdataJugemPoint.hh
++++ b/source/game/system/map/MapdataJugemPoint.hh
+@@ -27,6 +27,13 @@ public:
+     const EGG::Vector3f &rot() const {
+         return m_rot;
+     }
++
++    /// @brief The sound zone a respawn here applies, plus one (0: none): the hundreds of
++    /// the big-endian s16 at +0x1a (KMP::Holder<JGPT> ctor, USA 0x80513ff4).
++    s16 soundZone() const {
++        const s16 range = static_cast<s16>((m_rawData->_18[2] << 8) | m_rawData->_18[3]);
++        return range < 0 ? 0 : static_cast<s16>(range / 100);
++    }
+     /// @endGetters
+ 
+ private:
+diff --git a/source/game/system/map/MapdataStartPoint.hh b/source/game/system/map/MapdataStartPoint.hh
+index c60b37f..60264fa 100644
+--- a/source/game/system/map/MapdataStartPoint.hh
++++ b/source/game/system/map/MapdataStartPoint.hh
+@@ -21,6 +21,17 @@ public:
+     void findKartStartPoint(EGG::Vector3f &pos, EGG::Vector3f &angles, u8 placement,
+             u8 playerCount);
+ 
++    // Port: battle arenas place each kart on the point tagged with its slot.
++    [[nodiscard]] const EGG::Vector3f &position() const {
++        return m_position;
++    }
++    [[nodiscard]] const EGG::Vector3f &rotation() const {
++        return m_rotation;
++    }
++    [[nodiscard]] s16 playerIndex() const {
++        return m_playerIndex;
++    }
++
+ private:
+     [[maybe_unused]] const SData *m_rawData;
+     EGG::Vector3f m_position;
 diff --git a/source/game/system/RaceConfig.hh b/source/game/system/RaceConfig.hh
-index e9ab671..be3e208 100644
+index e9ab671..a35802a 100644
 --- a/source/game/system/RaceConfig.hh
 +++ b/source/game/system/RaceConfig.hh
 @@ -27,7 +27,8 @@ public:
@@ -6543,11 +6695,11 @@ index e9ab671..be3e208 100644
              Ghost_Race = 5,
          };
  
-@@ -50,6 +57,17 @@ public:
+@@ -50,6 +57,18 @@ public:
          std::array<Player, 12> players;
          u8 playerCount;
          Course course;
-+        u8 engineClass = 2; // Retail settings: 0=50cc, 1=100cc, 2=150cc.
++        u8 engineClass = 2; // Retail settings: 0=50cc, 1=100cc, 2=150cc; port: 3=200cc.
 +        GameMode gameMode = GameMode::Time_Trial;
 +        bool mirror = false;
 +        /// Port: every racer starts on the first grid spot of a one-racer
@@ -6555,14 +6707,201 @@ index e9ab671..be3e208 100644
 +        bool sharedStart = false;
 +        [[nodiscard]] f32 engineClassRate() const {
 +            // USA Kart::Movement constructor 80571840; table 808b1414.
-+            constexpr f32 rates[] = {0.8f, 0.9f, 1.0f};
-+            return rates[engineClass < 3 ? engineClass : 2];
++            // Port: 200cc (Retro Rewind, as Pulsar) runs at 1.5.
++            constexpr f32 rates[] = {0.8f, 0.9f, 1.0f, 1.5f};
++            return rates[engineClass < 4 ? engineClass : 2];
 +        }
      };
  
      typedef std::function<void(RaceConfig *, void *)> InitCallback;
+diff --git a/source/game/system/RaceManager.hh b/source/game/system/RaceManager.hh
+index 0faeaf7..3def485 100644
+--- a/source/game/system/RaceManager.hh
++++ b/source/game/system/RaceManager.hh
+@@ -28,17 +28,25 @@ class RaceManager : EGG::Disposer {
+     friend class Host::Context;
+ 
+ public:
++    static constexpr size_t MAX_LAPS = 9; ///< Port: Retro Rewind courses race up to nine laps.
++
+     class Player {
+     public:
+         Player();
+         virtual ~Player() {}
+ 
+-        void init();
++        void init(size_t index);
++        void bindInputs(size_t index);
+         void calc();
+ 
+         [[nodiscard]] Timer getLapSplit(size_t idx) const;
+ 
+         /// @beginGetters
++        [[nodiscard]] bool finished() const { return m_finished; }
++        [[nodiscard]] s16 currentLap() const { return m_currentLap; }
++        [[nodiscard]] u8 finishOrder() const { return m_finishOrder; }
++        void setFinishOrder(u8 order) { m_finishOrder = order; }
++
+         [[nodiscard]] u16 checkpointId() const {
+             return m_checkpointId;
+         }
+@@ -55,7 +63,7 @@ public:
+             return m_drivingWrongWay;
+         }
+ 
+-        [[nodiscard]] const std::array<Timer, 3> &lapTimers() const {
++        [[nodiscard]] const std::array<Timer, MAX_LAPS> &lapTimers() const {
+             return m_lapTimers;
+         }
+ 
+@@ -82,6 +90,9 @@ public:
+         void incrementLap();
+         void endRace(const Timer &finishTime);
+ 
++        size_t m_playerIndex = 0;
++        bool m_finished = false;
++        u8 m_finishOrder = 0;
+         u16 m_checkpointId;
+         f32 m_raceCompletion;
+         f32 m_checkpointFactor; ///< The proportion of a lap for the current checkpoint
+@@ -92,7 +103,7 @@ public:
+         s8 m_maxLap;
+         s8 m_maxKcp;
+         bool m_drivingWrongWay;
+-        std::array<Timer, 3> m_lapTimers;
++        std::array<Timer, MAX_LAPS> m_lapTimers;
+         Timer m_raceTimer;
+         const KPad *m_inputs;
+     };
+@@ -107,7 +118,7 @@ public:
+ 
+     void init();
+ 
+-    void findKartStartPoint(EGG::Vector3f &pos, EGG::Vector3f &angles);
++    void findKartStartPoint(EGG::Vector3f &pos, EGG::Vector3f &angles, size_t index = 0);
+     void endPlayerRace(u32 idx);
+ 
+     void calc();
+@@ -118,7 +129,7 @@ public:
+                 static_cast<std::underlying_type_t<Stage>>(stage);
+     }
+ 
+-    [[nodiscard]] MapdataJugemPoint *jugemPoint() const;
++    [[nodiscard]] MapdataJugemPoint *jugemPoint(size_t index = 0) const;
+ 
+     /// @beginGetters
+     /// @addr{0x80533090}
+@@ -130,14 +141,22 @@ public:
+         return m_random;
+     }
+ 
+-    [[nodiscard]] const Player &player() const {
+-        return m_player;
++    [[nodiscard]] const Player &player(size_t index = 0) const {
++        ASSERT(index < m_playerCount);
++        return m_players[index];
+     }
+ 
+     [[nodiscard]] const TimerManager &timerManager() const {
+         return m_timerManager;
+     }
+ 
++    /// Port hook: while held, the intro stage waits (karts and objects still
++    /// simulate). Retail ends the intro on the opening camera instead of the
++    /// fixed time-trial duration; the frontend releases it when the pan ends.
++    void setIntroHeld(bool held) {
++        m_introHeld = held;
++    }
++
+     [[nodiscard]] Stage stage() const {
+         return m_stage;
+     }
+@@ -147,6 +166,11 @@ public:
+     }
+     /// @endGetters
+ 
++    /// Port: laps in this race. Retail races 3; with s_courseLaps (Retro Rewind,
++    /// as Pulsar) the course's KMP stage info decides, up to MAX_LAPS.
++    [[nodiscard]] u8 lapCount() const;
++    static inline bool s_courseLaps = false;
++
+     static RaceManager *CreateInstance();
+     static void DestroyInstance();
+ 
+@@ -161,10 +185,13 @@ private:
+     ~RaceManager() override;
+ 
+     Random m_random;
+-    Player m_player;
++    std::array<Player, 12> m_players;
++    size_t m_playerCount = 1;
++    u8 m_finishCount = 0;
+     TimerManager m_timerManager;
+     Stage m_stage;
+     u16 m_introTimer;
++    bool m_introHeld = false;
+     u32 m_timer;
+ 
+     static constexpr u16 STAGE_COUNTDOWN_DURATION = 240;
+diff --git a/source/game/system/ResourceManager.cc b/source/game/system/ResourceManager.cc
+index 20d58f6..9f856b6 100644
+--- a/source/game/system/ResourceManager.cc
++++ b/source/game/system/ResourceManager.cc
+@@ -46,7 +46,11 @@ MultiDvdArchive *ResourceManager::load(s32 idx, const char *filename) {
+ /// @addr{0x80540760}
+ MultiDvdArchive *ResourceManager::load(Course courseId) {
+     char buffer[256];
+-    snprintf(buffer, sizeof(buffer), "Race/Course/%s", COURSE_NAMES[static_cast<s32>(courseId)]);
++    if (s_courseArchive) {
++        snprintf(buffer, sizeof(buffer), "%s", s_courseArchive);
++    } else {
++        snprintf(buffer, sizeof(buffer), "Race/Course/%s", COURSE_NAMES[static_cast<s32>(courseId)]);
++    }
+     m_archives[1]->load(buffer);
+     return m_archives[1];
+ }
+diff --git a/source/game/system/ResourceManager.hh b/source/game/system/ResourceManager.hh
+index cba7b9d..d84dfae 100644
+--- a/source/game/system/ResourceManager.hh
++++ b/source/game/system/ResourceManager.hh
+@@ -31,6 +31,11 @@ public:
+     [[nodiscard]] MultiDvdArchive *load(s32 idx, const char *filename);
+     void unmount(MultiDvdArchive *archive);
+ 
++    /// Port: archive to load as the course instead of the course ID's own
++    /// ("Race/Course/0", no extension), for custom tracks that run as a retail
++    /// course (Retro Rewind). nullptr loads the course ID's archive.
++    static inline const char *s_courseArchive = nullptr;
++
+     /// @addr{0x805419EC}
+     [[nodiscard]] static const char *GetVehicleName(Vehicle vehicle) {
+         return vehicle < Vehicle::Max ? VEHICLE_NAMES[static_cast<u8>(vehicle)] : nullptr;
+diff --git a/source/game/system/map/MapdataStageInfo.hh b/source/game/system/map/MapdataStageInfo.hh
+index 9d30a1f..ad9d9be 100644
+--- a/source/game/system/map/MapdataStageInfo.hh
++++ b/source/game/system/map/MapdataStageInfo.hh
+@@ -9,7 +9,7 @@ namespace Kinoko::System {
+ class MapdataStageInfo {
+ public:
+     struct SData {
+-        u8 _0[0x1 - 0x0];
++        u8 lapCount;
+         u8 polePosition;
+         u8 translationMode;
+         u8 _3[0xc - 0x3];
+@@ -20,6 +20,10 @@ public:
+ 
+     void read(EGG::Stream &stream);
+ 
++    [[nodiscard]] u8 lapCount() const {
++        return m_rawData->lapCount;
++    }
++
+     [[nodiscard]] u8 polePosition() const {
+         return m_rawData->polePosition;
+     }
 diff --git a/source/game/system/RaceManager.cc b/source/game/system/RaceManager.cc
-index 42decd3..d96d827 100644
+index 42decd3..fa743ee 100644
 --- a/source/game/system/RaceManager.cc
 +++ b/source/game/system/RaceManager.cc
 @@ -13,14 +13,40 @@ namespace Kinoko::System {
@@ -6692,7 +7031,7 @@ index 42decd3..d96d827 100644
  
  /// @addr{0x80532E3C}
  RaceManager::~RaceManager() {
-@@ -123,11 +174,17 @@ RaceManager::Player::Player() {
+@@ -123,13 +174,29 @@ RaceManager::Player::Player() {
  }
  
  /// @addr{0x80534194}
@@ -6711,8 +7050,20 @@ index 42decd3..d96d827 100644
 +        const EGG::Vector3f &pos = Kart::KartObjectManager::Instance()->object(m_playerIndex)->pos();
          f32 distanceRatio;
          s16 checkpointId = courseMap->findSector(pos, 0, distanceRatio);
++        // Port: a grid spot the search from the finish line misses (custom tracks
++        // whose grid spans two sectors, e.g. SNES Mario Circuit 1) took checkpoint 0
++        // and lost a lap on entering the last checkpoint. Find its sector directly.
++        for (u16 i = 0; checkpointId < 0 && i < courseMap->getCheckPointCount(); ++i) {
++            f32 ratio;
++            if (courseMap->getCheckPoint(i)->checkSectorAndDistanceRatio(pos, ratio) ==
++                    MapdataCheckPoint::SectorOccupancy::InsideSector) {
++                checkpointId = static_cast<s16>(i);
++            }
++        }
  
-@@ -140,8 +197,9 @@ void RaceManager::Player::init() {
+         m_checkpointId = std::max<s16>(0, checkpointId);
+         m_jugemId = courseMap->getCheckPoint(m_checkpointId)->jugemIndex();
+@@ -140,8 +207,9 @@ void RaceManager::Player::init() {
  
  /// @addr{0x80535304}
  void RaceManager::Player::calc() {
@@ -6723,7 +7074,7 @@ index 42decd3..d96d827 100644
  
      if (courseMap->getCheckPointCount() == 0 || courseMap->getCheckPathCount() == 0 ||
              kart->status().onBit(Kart::eStatus::BeforeRespawn)) {
-@@ -275,7 +333,7 @@ void RaceManager::Player::incrementLap() {
+@@ -275,7 +343,7 @@ void RaceManager::Player::incrementLap() {
          return;
      }
  
@@ -6732,8 +7083,23 @@ index 42decd3..d96d827 100644
      u16 addMs = CourseMap::Instance()->getCheckPointEntryOffsetMs(m_checkpointId, kart->pos(),
              kart->prevPos());
  
-@@ -295,8 +353,9 @@ void RaceManager::Player::incrementLap() {
+@@ -286,17 +354,23 @@ void RaceManager::Player::incrementLap() {
+     ASSERT(static_cast<size_t>(m_maxLap - 1) < m_lapTimers.size());
+     m_lapTimers[m_maxLap - 1] = timer;
  
+-    if (m_maxLap >= 3) {
++    if (m_maxLap >= RaceManager::Instance()->lapCount()) {
+         endRace(timer);
+     } else {
+         m_maxLap = m_currentLap;
+     }
+ }
+ 
++u8 RaceManager::lapCount() const {
++    const auto *stage = s_courseLaps ? CourseMap::Instance()->getStageInfo() : nullptr;
++    return stage && stage->lapCount() ? std::min<u8>(stage->lapCount(), MAX_LAPS) : 3;
++}
++
  /// @addr{0x805347F4}
  void RaceManager::Player::endRace(const Timer &finishTime) {
 +    m_finished = true;
@@ -6743,189 +7109,3 @@ index 42decd3..d96d827 100644
  }
  
  RaceManager *RaceManager::s_instance = nullptr; ///< @addr{0x809BD730}
-diff --git a/source/game/system/RaceManager.hh b/source/game/system/RaceManager.hh
-index 0faeaf7..1f9b193 100644
---- a/source/game/system/RaceManager.hh
-+++ b/source/game/system/RaceManager.hh
-@@ -33,12 +33,18 @@ public:
-         Player();
-         virtual ~Player() {}
- 
--        void init();
-+        void init(size_t index);
-+        void bindInputs(size_t index);
-         void calc();
- 
-         [[nodiscard]] Timer getLapSplit(size_t idx) const;
- 
-         /// @beginGetters
-+        [[nodiscard]] bool finished() const { return m_finished; }
-+        [[nodiscard]] s16 currentLap() const { return m_currentLap; }
-+        [[nodiscard]] u8 finishOrder() const { return m_finishOrder; }
-+        void setFinishOrder(u8 order) { m_finishOrder = order; }
-+
-         [[nodiscard]] u16 checkpointId() const {
-             return m_checkpointId;
-         }
-@@ -82,6 +88,9 @@ public:
-         void incrementLap();
-         void endRace(const Timer &finishTime);
- 
-+        size_t m_playerIndex = 0;
-+        bool m_finished = false;
-+        u8 m_finishOrder = 0;
-         u16 m_checkpointId;
-         f32 m_raceCompletion;
-         f32 m_checkpointFactor; ///< The proportion of a lap for the current checkpoint
-@@ -107,7 +116,7 @@ public:
- 
-     void init();
- 
--    void findKartStartPoint(EGG::Vector3f &pos, EGG::Vector3f &angles);
-+    void findKartStartPoint(EGG::Vector3f &pos, EGG::Vector3f &angles, size_t index = 0);
-     void endPlayerRace(u32 idx);
- 
-     void calc();
-@@ -118,7 +127,7 @@ public:
-                 static_cast<std::underlying_type_t<Stage>>(stage);
-     }
- 
--    [[nodiscard]] MapdataJugemPoint *jugemPoint() const;
-+    [[nodiscard]] MapdataJugemPoint *jugemPoint(size_t index = 0) const;
- 
-     /// @beginGetters
-     /// @addr{0x80533090}
-@@ -130,14 +139,22 @@ public:
-         return m_random;
-     }
- 
--    [[nodiscard]] const Player &player() const {
--        return m_player;
-+    [[nodiscard]] const Player &player(size_t index = 0) const {
-+        ASSERT(index < m_playerCount);
-+        return m_players[index];
-     }
- 
-     [[nodiscard]] const TimerManager &timerManager() const {
-         return m_timerManager;
-     }
- 
-+    /// Port hook: while held, the intro stage waits (karts and objects still
-+    /// simulate). Retail ends the intro on the opening camera instead of the
-+    /// fixed time-trial duration; the frontend releases it when the pan ends.
-+    void setIntroHeld(bool held) {
-+        m_introHeld = held;
-+    }
-+
-     [[nodiscard]] Stage stage() const {
-         return m_stage;
-     }
-@@ -161,10 +178,13 @@ private:
-     ~RaceManager() override;
- 
-     Random m_random;
--    Player m_player;
-+    std::array<Player, 12> m_players;
-+    size_t m_playerCount = 1;
-+    u8 m_finishCount = 0;
-     TimerManager m_timerManager;
-     Stage m_stage;
-     u16 m_introTimer;
-+    bool m_introHeld = false;
-     u32 m_timer;
- 
-     static constexpr u16 STAGE_COUNTDOWN_DURATION = 240;
-diff --git a/source/game/system/map/MapdataCheckPoint.cc b/source/game/system/map/MapdataCheckPoint.cc
-index aec1afc..7867992 100644
---- a/source/game/system/map/MapdataCheckPoint.cc
-+++ b/source/game/system/map/MapdataCheckPoint.cc
-@@ -41,7 +41,8 @@ void MapdataCheckPoint::initCheckpointLinks(MapdataCheckPointAccessor &accessor,
-         if (checkpath) {
-             m_prevCount = 0;
- 
--            for (auto [i, prevID] : std::views::enumerate(checkpath->prev())) {
-+            for (size_t i = 0; i < checkpath->prev().size(); ++i) {
-+                auto prevID = checkpath->prev()[i];
-                 if (prevID == 0xFF) {
-                     continue;
-                 }
-@@ -63,7 +64,8 @@ void MapdataCheckPoint::initCheckpointLinks(MapdataCheckPointAccessor &accessor,
-         if (checkpath) {
-             m_nextCount = 0;
- 
--            for (auto [i, nextID] : std::views::enumerate(checkpath->next())) {
-+            for (size_t i = 0; i < checkpath->next().size(); ++i) {
-+                auto nextID = checkpath->next()[i];
-                 if (nextID == 0xFF) {
-                     continue;
-                 }
-@@ -78,7 +80,8 @@ void MapdataCheckPoint::initCheckpointLinks(MapdataCheckPointAccessor &accessor,
-     }
- 
-     // Form the checkpoint's quadrilateral(s)
--    for (auto [i, next] : std::views::enumerate(m_nextPoints)) {
-+    for (size_t i = 0; i < m_nextPoints.size(); ++i) {
-+        auto &next = m_nextPoints[i];
-         if (i < m_nextCount) {
-             auto &nextLinked = m_nextPoints[i];
-             auto *nextPoint = nextLinked.checkpoint;
-diff --git a/source/game/system/map/MapdataCheckPoint.hh b/source/game/system/map/MapdataCheckPoint.hh
-index 6806608..8aa836e 100644
---- a/source/game/system/map/MapdataCheckPoint.hh
-+++ b/source/game/system/map/MapdataCheckPoint.hh
-@@ -89,6 +89,15 @@ public:
-         return m_dir;
-     }
- 
-+    /// The checkpoint line's ends (the road's edges), for map drawing.
-+    [[nodiscard]] const EGG::Vector2f &left() const {
-+        return m_left;
-+    }
-+
-+    [[nodiscard]] const EGG::Vector2f &right() const {
-+        return m_right;
-+    }
-+
-     [[nodiscard]] u16 id() const {
-         return m_id;
-     }
-diff --git a/source/game/system/map/MapdataJugemPoint.hh b/source/game/system/map/MapdataJugemPoint.hh
-index 7e4c5b1..aa2d565 100644
---- a/source/game/system/map/MapdataJugemPoint.hh
-+++ b/source/game/system/map/MapdataJugemPoint.hh
-@@ -27,6 +27,13 @@ public:
-     const EGG::Vector3f &rot() const {
-         return m_rot;
-     }
-+
-+    /// @brief The sound zone a respawn here applies, plus one (0: none): the hundreds of
-+    /// the big-endian s16 at +0x1a (KMP::Holder<JGPT> ctor, USA 0x80513ff4).
-+    s16 soundZone() const {
-+        const s16 range = static_cast<s16>((m_rawData->_18[2] << 8) | m_rawData->_18[3]);
-+        return range < 0 ? 0 : static_cast<s16>(range / 100);
-+    }
-     /// @endGetters
- 
- private:
-diff --git a/source/game/system/map/MapdataStartPoint.hh b/source/game/system/map/MapdataStartPoint.hh
-index c60b37f..60264fa 100644
---- a/source/game/system/map/MapdataStartPoint.hh
-+++ b/source/game/system/map/MapdataStartPoint.hh
-@@ -21,6 +21,17 @@ public:
-     void findKartStartPoint(EGG::Vector3f &pos, EGG::Vector3f &angles, u8 placement,
-             u8 playerCount);
- 
-+    // Port: battle arenas place each kart on the point tagged with its slot.
-+    [[nodiscard]] const EGG::Vector3f &position() const {
-+        return m_position;
-+    }
-+    [[nodiscard]] const EGG::Vector3f &rotation() const {
-+        return m_rotation;
-+    }
-+    [[nodiscard]] s16 playerIndex() const {
-+        return m_playerIndex;
-+    }
-+
- private:
-     [[maybe_unused]] const SData *m_rawData;
-     EGG::Vector3f m_position;

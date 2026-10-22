@@ -6,7 +6,7 @@ KCL surface flags. A rough visual import does not imply object or mode parity.
 """
 import argparse,collections,concurrent.futures,hashlib,json,os,struct,subprocess,sys
 from pathlib import Path
-from course_catalog import ROOT,courses
+from course_catalog import ROOT,courses,write_header
 sys.path.insert(0,str(ROOT/'vendor/gclib'))
 from unpack_szs import unpack
 from cook_model import cook
@@ -55,7 +55,8 @@ def import_one(c,force=False):
         if not force and receipt_path.exists():
             old=json.loads(receipt_path.read_text())
             if old.get('status')=='imported' and old.get('archive_sha256')==source_hash and all((OUT/p).exists() for p in old.get('model_lists',[])):
-                return old
+                # Receipts from older builds lack newer catalog fields (run_as): the catalog wins.
+                old.update(c);write(receipt_path,old);return old
         receipt.update(archive_sha256=source_hash,archive_bytes=source.stat().st_size)
         folder=ROOT/'assets/courses'/c['key'];unpack(source,folder)
         receipt['resources']={p.relative_to(folder).as_posix():{'bytes':p.stat().st_size,'sha256':digest(p)} for p in sorted(folder.rglob('*')) if p.is_file() and not p.name.startswith('._')}
@@ -93,6 +94,8 @@ def import_one(c,force=False):
             model_list=f'models/{prefix}.list'
             if not (OUT/model_list).is_file():raise ValueError('Missing cooked model list '+model_list)
             parts=(OUT/model_list).read_text().split()
+            if not parts and label!='course' and os.environ.get('MKW_RR'):
+                receipt['limitations'].append(f'Empty {label} model');continue
             if not parts:raise ValueError('Empty '+model_list)
             receipt['model_lists'].append(model_list)
             detail=json.loads((OUT/f'models/{prefix}-receipt.json').read_text())
@@ -109,6 +112,8 @@ def import_one(c,force=False):
         receipt['limitations']+=['Rough course/sky import; course materials without a runtime equivalent use documented fallbacks (docs/COURSE_IMPORT.md)','Retail course lighting: GX channels, EGG light textures and fog per docs/COURSE_LIGHTING.md; shadows remain unsupported','Fog, indirect effects, cameras, audio and non-linear animations are not fully implemented','Race availability requires native host smoke check; complete-lap and hardware performance parity are unverified']
         if c['kind']=='arena':receipt['limitations'].append('Asset import only: Balloon Battle and Coin Runners are not implemented')
         receipt['status']='imported'
+        # tools/lighting/recook_courses.py skips a course cooked by this exporter (same settings).
+        receipt['exporter_sha256']=digest(ROOT/'build/export_brres.mjs')
     except Exception as e:receipt['error']=str(e)
     write(receipt_path,receipt);print(c['id'],c['name'],receipt['status'],receipt.get('error',''),flush=True);return receipt
 
@@ -116,7 +121,7 @@ def publish(receipts):
     # The runtime catalog remains small; verbose extraction evidence is separate.
     compact=[]
     for r in receipts:
-        v={k:r[k] for k in ('id','enum','name','kind','cup','slot','archive','key','status')}
+        v={k:r[k] for k in ('id','enum','name','kind','cup','slot','archive','key','run_as','status')}
         v.update(archive_sha256=r.get('archive_sha256'),model_lists=r.get('model_lists',[]),receipt=f"models/courses/{r['id']:02d}.json",runtime_validation=r.get('runtime_validation','pending'))
         compact.append(v)
     write(OUT/'models/course-catalog.json',{'version':1,'courses':compact,'battle_modes_implemented':False})
@@ -125,10 +130,17 @@ def publish(receipts):
 def main():
     p=argparse.ArgumentParser();p.add_argument('--jobs',type=int,default=3);p.add_argument('--force',action='store_true');p.add_argument('--ids',type=int,nargs='*');a=p.parse_args()
     subprocess.run(['node','tools/bundle_cooker.mjs'],cwd=ROOT,check=True)
-    selected=[c for c in courses() if a.ids is None or c['id'] in a.ids]
-    with concurrent.futures.ThreadPoolExecutor(max_workers=a.jobs) as pool:receipts=list(pool.map(lambda c:import_one(c,a.force),selected))
+    # Retro Rewind tracks that failed before are tried again (courses() leaves them out).
+    selected=[c for c in courses(False) if c.get('selected',c['cooked']) and (a.ids is None or c['id'] in a.ids)]
+    # Processes, not threads: unpacking (pure-Python Yaz0) and cooking are Python-bound under the GIL.
+    import functools
+    with concurrent.futures.ProcessPoolExecutor(max_workers=a.jobs) as pool:receipts=list(pool.map(functools.partial(import_one,force=a.force),selected))
     if a.ids is not None:
         receipts=[json.loads((OUT/f"models/courses/{c['id']:02d}.json").read_text()) for c in courses()]
     publish(receipts)
+    if os.environ.get('MKW_RR'):
+        # A Retro Rewind track that does not import is listed as not available instead of stopping the build.
+        write_header({r['id'] for r in receipts if r['status']=='imported'})
+        receipts=[r for r in receipts if r['kind']=='arena']
     if any(r['status']!='imported' for r in receipts):raise SystemExit(1)
 if __name__=='__main__':main()

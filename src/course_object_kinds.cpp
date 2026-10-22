@@ -440,10 +440,8 @@ void drawKoopaBall(ObjectDraw& d,Visual& v){
         if(v.extra[0].model)d.submit(v.extra[0].model,m,animAt(v.extra[0],float(d.tick)));
         if(v.shadow.model)d.shadow(v.shadow.model,m);
     }else if(state==2){
-        // The ball's collision is 870 units at scale 1; the bombCore mesh is 87.
-        C3D_Mtx e=m;const float factor=10.f;
-        for(unsigned r=0;r<3;++r)for(unsigned c=1;c<4;++c)e.r[r].c[c]*=factor;
-        drawExplosion(d,e,float(int(b.explodeFrames())-b.explodeTimer()));
+        // The ball's collision is 870 units at scale 1, the size the bombCore clip grows to.
+        drawExplosion(d,m,float(int(b.explodeFrames())-b.explodeTimer()));
     }
 }
 // GBA Shy Guy Beach cannonballs (Kinoko ObjectHeyhoBall): nothing while in
@@ -455,7 +453,8 @@ void drawHeyhoBall(ObjectDraw& d,Visual& v){
     const int state=b.stateId();
     if(state==0)return;
     if(state==3){
-        const float scale=1500.f/87.f;
+        // bombCore is 87 units at frame 0 and its clip grows it to 870.
+        const float scale=1500.f/870.f;
         drawExplosion(d,basisMatrix({1,0,0},{0,1,0},{0,0,1},vec(b.pos()),{scale,scale,scale}),float(b.stateFrame()));
         return;
     }

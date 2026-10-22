@@ -12,8 +12,8 @@ public:
  enum Stage {Simulation,UiPrepare,Wait,Course,Scenery,Opponents,Items,Player,Effects,Hud,Bottom,Submit,StageCount};
  RuntimeProfile(){
 #ifndef MKW_RELEASE
-  if(FILE* marker=std::fopen("ux0:data/mkw/performance.txt","r")){
-   std::fclose(marker);file_=std::fopen("ux0:data/mkw/performance.csv","w");
+  if(FILE* marker=std::fopen(MKW_DATA_ROOT "/performance.txt","r")){
+   std::fclose(marker);file_=std::fopen(MKW_DATA_ROOT "/performance.csv","w");
    if(file_)std::fputs("course,frame,rendered,physics_ticks,interval_ms,simulation_ms,ui_prepare_ms,wait_ms,course_ms,scenery_ms,opponents_ms,items_ms,player_ms,effects_ms,hud_ms,bottom_ms,submit_ms,previous_gpu_queue_ms,draws,triangles,culled_triangles,culled_submeshes,flush_calls,flush_bytes,pose_evaluations,pose_reuses,skinned_vertices,linear_free,command_usage,render_thread_ms,render_begin_wait_ms,record_wait_ms,worker_ms\n",file_);
   }
 #endif

@@ -19,3 +19,10 @@ libshacccg.suprx
 # The game iso files
 *.iso
 *.wbfs
+# Build and console logs (both editions)
+build-rr-*.txt
+vita.log
+runtime.log
+audio-status.txt
+audio-race-status.txt
+effects-state.txt

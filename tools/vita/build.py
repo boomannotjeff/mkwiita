@@ -8,7 +8,7 @@ Steps, each skipped when already done (rerun to resume):
               tex3ds (devkitPro's texture converter, fetched into .toolchain)
   2. sources  pinned Kinoko, citro3d, libctru, noclip, gclib (tools/bootstrap.py)
   3. assets   your disc -> build/vita/data/mkw (tools/vita/build_assets.py, about an hour)
-  4. vpk      the game -> build/vita/mkw.vpk (CMake)
+  4. vpk      the game -> build/vita/mkw.vpk, or mkw-retro-rewind.vpk with --rr (CMake)
 
 --assets-only stops after step 3 and needs no VitaSDK: for a VPK downloaded
 from the releases (Build Game Files.bat).
@@ -96,7 +96,11 @@ def main():
     p.add_argument('--release', action='store_true', help='no test hooks or runtime log')
     p.add_argument('--mipmaps', action='store_true', help='experimental texture mipmaps (see tools/vita/build_assets.py)')
     p.add_argument('--force-cook', action='store_true', help='cook every asset again')
+    p.add_argument('--rr', type=Path, help='Retro Rewind folder (RetroRewind6): builds the separate Retro Rewind edition')
+    p.add_argument('--rr-cups', default='all', help='Retro Rewind cups to cook: all (default), or e.g. RT:0 or RT:0-3,CT:1')
+    p.add_argument('--rr-skins', default='all', help='Retro Rewind skins to cook: all (default), or character codes (mr,lg)')
     a = p.parse_args()
+    data = 'mkwrr' if a.rr else 'mkw'
     if a.assets_only and a.skip_assets:
         raise SystemExit('--assets-only and --skip-assets leave nothing to build')
     sys.path[:0] = [str(ROOT / 'tools')]
@@ -108,16 +112,20 @@ def main():
     run([sys.executable, 'tools/bootstrap.py'])
     if not a.skip_assets:
         run([sys.executable, 'tools/vita/build_assets.py', *([a.disc] if a.disc else []),
-             *(['--mipmaps'] if a.mipmaps else []), *(['--force-cook'] if a.force_cook else [])])
+             *(['--mipmaps'] if a.mipmaps else []), *(['--force-cook'] if a.force_cook else []),
+             *(['--rr', a.rr, '--rr-cups', a.rr_cups, '--rr-skins', a.rr_skins] if a.rr else [])])
     build = ROOT / 'build/vita'
     if a.assets_only:
-        log('done:', build / 'data/mkw')
-        log('Copy the contents of that folder to ux0:data/mkw on your Vita, and install the VPK from the release.')
+        log('done:', build / 'data' / data)
+        log(f'Copy the contents of that folder to ux0:data/{data} on your Vita, and install the VPK from the release.')
         return
-    run(['cmake', '-G', 'Ninja', '-S', '.', '-B', build, '-DCMAKE_BUILD_TYPE=Release', f'-DMKW_RELEASE={"ON" if a.release else "OFF"}'])
+    if a.rr:  # the content stamp (tools/vita/gen_headers.py) counts the Retro Rewind cook steps
+        os.environ.update(MKW_RR=str(a.rr.resolve()), MKW_RR_CUPS=a.rr_cups, MKW_RR_SKINS=a.rr_skins)
+    run(['cmake', '-G', 'Ninja', '-S', '.', '-B', build, '-DCMAKE_BUILD_TYPE=Release', f'-DMKW_RELEASE={"ON" if a.release else "OFF"}',
+         f'-DMKW_VARIANT={"rr" if a.rr else "retail"}'])
     run(['cmake', '--build', build])
-    log('done:', build / 'mkw.vpk')
-    log('Install it with VitaShell, then copy the contents of', build / 'data/mkw', 'to ux0:data/mkw on your Vita.')
+    log('done:', build / ('mkw-retro-rewind.vpk' if a.rr else 'mkw.vpk'))
+    log('Install it with VitaShell, then copy the contents of', build / 'data' / data, f'to ux0:data/{data} on your Vita.')
 
 
 if __name__ == '__main__':

@@ -28,7 +28,8 @@ def main():
     garage = ROOT / 'build/roster/models/garage.json'
     rows = json.loads(garage.read_text())['choices']
     expected_count = len(ROSTER) * VEHICLES_PER_DRIVER
-    if len(rows) != expected_count or len({r['prefix'] for r in rows}) != expected_count:
+    # Retro Rewind skins (tools/cook_rr_skins.py) follow the retail choices.
+    if len(rows) < expected_count or len({r['prefix'] for r in rows}) != len(rows):
         raise ValueError(f'Expected all {expected_count} supported retail driver/vehicle combinations')
     output = ROOT / 'build/vehicle-shadows'
     work = ROOT / 'build/vehicle-shadow-work'
@@ -82,7 +83,7 @@ def main():
         return result
 
     start = time.monotonic()
-    with ThreadPoolExecutor(max_workers=max(1, min(args.jobs, 3))) as pool:
+    with ThreadPoolExecutor(max_workers=max(1, args.jobs)) as pool:
         results = list(pool.map(export, rows))
     manifest = {'version': 1, 'method': 'original retail shadow volume geometry',
                 'elapsed_seconds': round(time.monotonic() - start, 2), 'choices': results}

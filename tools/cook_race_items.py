@@ -29,6 +29,7 @@ WORLD = {
     6: ("bomb", "bomb", "wait_a"),
     7: ("togezo_koura", "togezo_koura", "fly"),
     9: ("star", "star", None),
+    12: ("gesso", "gesso", "start"),
     13: ("pow_bloc_plane", "pow_bloc_plane", "attack1"),
     14: ("kumo", "kumo", "kumo"),
     15: ("kart_killer", "kart_killer", "wait"),
