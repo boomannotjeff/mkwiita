@@ -13,7 +13,8 @@ const char* phaseName(UiFocusPhase phase){
  switch(phase){case UiFocusPhase::Free:return "Free";case UiFocusPhase::FreeToSelect:return "FreeToSelect";
  case UiFocusPhase::Select:return "Select";case UiFocusPhase::SelectToFree:return "SelectToFree";}return "Free";
 }
-unsigned mainGroup(unsigned cursor){return cursor==0?0:cursor<4?1:cursor<6?2:3;}
+// Slot 7, License Settings, has no tile frame.
+unsigned mainGroup(unsigned cursor){return cursor==0?0:cursor<4?1:cursor<6?2:cursor<7?3:4;}
 bool selected(const MenuState& state,unsigned cursor,unsigned slot){
  return slot<UiFocusButtonCount?slot==cursor:
      state.page==UiPage::MainMenu&&slot==UiFocusMainParentBase+mainGroup(cursor);
@@ -54,12 +55,16 @@ const char* uiFocusControlName(const MenuState& state,unsigned slot){
  }
  if(slot>=state.count())return "";
  switch(state.page){
- case UiPage::License:return slot<2?"LicenseSelectT":"LicenseSelectB";
- case UiPage::MainMenu:return slot==0?"TopMenuSingle":slot<4?"TopMenuMulti":slot<6?"TopMenuWifi":"TopMenuChannel";
+ case UiPage::License:return slot==4?"LicenseSelectS":slot<2?"LicenseSelectT":"LicenseSelectB";
+ case UiPage::Options:return "YesNoButton";
+ case UiPage::Controls:case UiPage::GameSettings:return slot+1==state.count()?"VSSetting":"";
+ case UiPage::MainMenu:return slot==0?"TopMenuSingle":slot<4?"TopMenuMulti":slot<6?"TopMenuWifi":slot<7?"TopMenuChannel":"FileAdmin";
+ case UiPage::LicenseSettings:return "FileAdminTop";
+ case UiPage::EraseLicense:return "YesNoButton";
  case UiPage::Mode:return "SingleTop";
  case UiPage::EngineClass:return "ClassSelect2";
- case UiPage::VSMode:return "VSSelect";
- case UiPage::BattleMode:return "BattleSelect";
+ case UiPage::VSMode:return slot==2?"RuleSetting":"VSSelect";
+ case UiPage::BattleMode:return slot==2?"RuleSetting":"BattleSelect";
  case UiPage::Rules:{
   // Only OK runs PushButton focus clips; the radio rows show baked states.
   if(slot+1!=state.count())return "";
@@ -67,7 +72,7 @@ const char* uiFocusControlName(const MenuState& state,unsigned slot){
  }
  case UiPage::Character:{constexpr const char* names[]={"CharacterSelect4_0","CharacterSelect4_1","CharacterSelect4_2","CharacterSelect4_3"};return names[std::min(slot/8,3u)];}
  case UiPage::Vehicle:return state.columns()==2?"MachineSelect2_6":"MachineSelect1_6";
- case UiPage::Drift:return "PadEasy";
+ case UiPage::Drift:return slot==2?"DriftHelp":"PadEasy";
  case UiPage::Cup:return "CupSelectCup";
  case UiPage::Course:return "CourseSelectCourse";
  case UiPage::BattleCup:return "BattleCupSelectCup";

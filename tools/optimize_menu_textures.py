@@ -56,7 +56,9 @@ def measure():
     exe.parent.mkdir(parents=True, exist_ok=True)
     sources = ['tools/menu_sprite_scales.cpp', 'src/menu_ui.cpp', 'src/menu_state.cpp', 'src/menu_transition.cpp',
                'src/menu_focus.cpp', 'src/menu_index.cpp', 'src/menu_text_motion.cpp', 'src/progress.cpp']
-    subprocess.run(['clang++', '-std=c++2b', '-O2', '-I' + str(ROOT / 'include'), '-o', str(exe),
+    subprocess.run(['clang++', '-std=c++2b', '-O2', '-I' + str(ROOT / 'include'), '-I' + str(ROOT / 'vendor/kinoko/include'), '-I' + str(ROOT / 'vendor/kinoko/source'),
+                    # Kinoko's headers lean on GCC's transitive includes; libc++ needs them named.
+                    '-include', 'bit', '-include', 'algorithm', '-include', str(ROOT / 'tools/host_compat.hpp'), '-static', '-o', str(exe),
                     *[str(ROOT / s) for s in sources]], check=True)
     out = ROOT / 'build/host-tools/sprite-scales.json'
     subprocess.run([str(exe), str(out)], check=True)

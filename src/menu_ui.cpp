@@ -8,6 +8,8 @@
 #include <mkw/menu_text_motion.hpp>
 #include <mkw/progress.hpp>
 #include <mkw/garage_skins.hpp>
+#include <mkw/controls.hpp>
+#include <mkw/staff_ghost_info.hpp>
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -168,13 +170,33 @@ public:
     const bool resident=transition&&transition->preload&&(at==loop.firstSlice||std::strcmp(slice.key,UiBorderSlices[at-1].key));
     if(slice.frame==frame||resident)region(slice.key,slice.x,slice.y,slice.w,slice.h,slice.u0,slice.v0,slice.u1,slice.v1,p,alpha,key);
    }
+   tails(key,p,alpha);
    return;
   }
+  layer(key,r,key,p,alpha);
+  tails(key,p,alpha);
+ }
+ // A cooked panel image placed like its parent panel, with the parent's focus motion.
+ void layer(const char* key,const UiPanelInfo& r,const char* focusKey,Pose p,float alpha){
   float x=p.x+r.x*p.sx,y=-p.y+r.y*p.sy,w=r.w*p.sx,h=r.h*p.sy;
   // These flattened button panels share an animated parent. Per-pane
   // submissions (movies, icons, text) sample their full ancestry separately.
-  applyMotion(x,y,w,h,alpha,p,panelFocus(key,p));
+  applyMotion(x,y,w,h,alpha,p,panelFocus(focusKey,p));
   sprite(key,x,y,w,h,alpha,0xffffffff,p);
+ }
+ // The panes the cook split off after an animated picture (tools/cook_menu_ui.py
+ // bake_panel): frames, arrows and borders drawn over the panel image.
+ void tails(const char* key,Pose p,float alpha){
+  Name family(key);unsigned part=0;
+  if(char* s=std::strstr(family.text,"_underlay")){*s=0;part=1;}else if(char* s=std::strstr(family.text,"_overlay")){*s=0;part=2;}
+  unsigned state=0;
+  if(char* s=std::strstr(family.text,"_select");s&&!s[7]){*s=0;state=1;}else if(char* s=std::strstr(family.text,"_free");s&&!s[5])*s=0;else return;
+  for(const auto& t:UiPanelTails){
+   if(t.part!=part||std::strcmp(t.panel,family))continue;
+   // shortcut: the animated film itself is not drawn, so its "film absent" variant is used; draw UiFocusSprites to switch on film alpha.
+   const char* tail=*t.keys[state][0]?t.keys[state][0]:t.keys[state][1];
+   if(const auto* r=*tail?uiFindPanel(tail):nullptr)layer(tail,*r,key,p,alpha);
+  }
  }
  void graph(float fraction,Pose p){
   fraction=std::clamp(fraction,0.f,1.f);if(fraction<=0)return;
@@ -334,6 +356,48 @@ public:
   panel("button_select",{0,-12,1.1f,cls?2.6f:2.f});label("Unlocked!",0,cls?-62:-52,400,37,0xffe040ffu);
   label(Progress::unlockableName(i),0,cls?-22:-12,400,37);if(cls)label(cls,0,18,400,37);
  }
+ // A message window (common_w017_message) over a dimmed page, its text one baked line at a time.
+ void message(const char* text){
+  panel("confirm_back",control("RaceConfirmBack","BlackBack"));
+  const Pose p=control("MessageWindow","MessageWindow");panel("message",p);
+  const auto* r=pane("message","text");if(!r)return;
+  // Blank lines (paragraph breaks) are skipped, as the lines were baked without them.
+  unsigned n=0;for(const char* at=text;*at;++at)n+=(at==text||at[-1]=='\n')&&*at!='\n';
+  if(!n)return;
+  const float lineH=std::min(r->fontH>0?r->fontH*1.15f:r->h,r->h/float(n));
+  unsigned i=0;
+  for(const char* at=text;*at;){const char* end=std::strchr(at,'\n');const size_t len=end?size_t(end-at):std::strlen(at);
+   if(len){char line[160];std::snprintf(line,sizeof line,"%.*s",int(len),at);
+    UiPaneInfo one=*r;one.h=lineH;one.y=r->y+(r->h-lineH*float(n))*.5f+lineH*float(i++);one.textPosition=4;
+    textSprite(lookup().find(line,true,r->font,r->textStyle),one,p);}
+   at=end?end+1:at+len;}
+ }
+ // A license card (common_w076): its name, the cup icons ("?" until unlocked) and
+ // the trophy grid; selected, retail's glow frame over the plain card.
+ void licenseCard(const char* family,Pose p,const License& l,bool selected){
+  const Name base(family,"_free");panel(base,p);
+  if(selected)if(const auto* r=uiFindPanel(Name(family,"_selectin_waku_light_01"))){const auto first=out.size();
+   layer(r->key,*r,base,p,1);for(auto i=first;i<out.size();++i)out[i].additive=true;}
+  if(!l.used){text("NEW",base,p,0xffffffff,"new");return;}
+  chars(l.name,base,p,0xffffffff,"player");
+  static constexpr const char* cups[]={"n_0_kinoko","n_1_flower","n_2_star","n_3_special","r_0_koura","r_1_banana","r_2_konoha","r_3_thunder"};
+  static constexpr const char* hatena[]={"","","n_2_hatena","n_3_hatena","","","r_2_hatena","r_3_hatena"};
+  static constexpr const char* rows[]={"cc50","cc100","cc150","cc_mirror"};
+  static constexpr const char* classes[]={"class_50","class_100","class_150","mirror"};
+  static constexpr const char* labels[]={"50cc","100cc","150cc","Mirror"};
+  static constexpr const char* colors[]={"","license_bronze_color","license_silver_color","license_gold_color"};
+  auto won=[&](unsigned cup){for(unsigned k=0;k<4;++k)if(l.trophy[k][cup])return true;return false;};
+  bool mirror=progress().unlockAll;
+  if(!mirror){mirror=true;for(unsigned c=0;c<8;++c)mirror&=l.trophy[2][c]==3;}
+  for(unsigned c=0;c<8;++c){
+   // Star and Special (Leaf and Lightning) open once the cup before them is won.
+   const bool open=progress().unlockAll||c%4<2||won(c)||won(c-1);
+   char key[40];std::snprintf(key,sizeof key,"license_%s",open?cups[c]:hatena[c]);inPane(key,base,open?cups[c]:hatena[c],p,1,true);
+   for(unsigned k=0;k<4;++k){if(!l.trophy[k][c]||(k==3&&!mirror))continue;
+    char cell[24];std::snprintf(cell,sizeof cell,"%s_%02u",rows[k],c);inPane(colors[std::min<unsigned>(l.trophy[k][c],3)],base,cell,p,1,true);}
+  }
+  for(unsigned k=0;k<4;++k)if(k<3||mirror)text(labels[k],base,p,0xffffffff,classes[k]);
+ }
  void notice(){if(!state.unavailable)return;panel("button_select",{0,-12,.95f,1.35f});label(state.locked?"Locked":"Not available",0,-20,400,37);}
  void dim(std::size_t from){for(auto i=from;i<out.size();++i)out[i].tint=LockedTint;}
 };
@@ -386,11 +450,9 @@ static void composeMenuImpl(const MenuState& s,const UiRaceView& race,std::vecto
   }break;
  case UiPage::License:{
   c.chrome("Select License");
-  for(unsigned i=0;i<4;++i){char name[32];std::snprintf(name,sizeof name,"License%u",i);Pose p=control(i<2?"LicenseSelectT":"LicenseSelectB",name,i);auto base=c.buttonState(i<2?"license_top_empty":"license_bottom_empty",i);c.panel(base.c_str(),p);
-   // A used slot shows its license's name, set a character at a time.
-   if(const auto& l=progress().license[i];l.used)c.chars(l.name,base.c_str(),p,0xffffffff,"new");else c.text("NEW",base.c_str(),p,0xffffffff,"new");if(i==s.cursor)c.glow(i<2?"license_top_empty":"license_bottom_empty",p);
+  for(unsigned i=0;i<4;++i){char name[32];std::snprintf(name,sizeof name,"License%u",i);Pose p=control(i<2?"LicenseSelectT":"LicenseSelectB",name,i);c.licenseCard(i<2?"license_top_empty":"license_bottom_empty",p,progress().license[i],i==s.cursor);if(i==s.cursor)c.glow(i<2?"license_top_empty":"license_bottom_empty",p);
   }
-  Pose option=control("LicenseSelectS","Option");c.panel("option_free",option);c.text("Settings","option_free",option);
+  c.button("option",4,control("LicenseSelectS","Option",4),"Options");
   break;
  }
  case UiPage::MainMenu:{
@@ -403,7 +465,7 @@ static void composeMenuImpl(const MenuState& s,const UiRaceView& race,std::vecto
   }
   c.chrome("Main Menu",s.cursor==0?UiHelpMain[0]:s.cursor<4?UiHelpMainMulti[s.cursor-1]:s.cursor<6?UiHelpWfc[s.cursor-4]:UiHelpMain[3]);
   // License Settings overlaps the top banner and draws above it.
-  {Pose edit=control("FileAdmin","ButtonFileAdmin");c.panel("license_edit_free",edit);c.text("License Settings","license_edit_free",edit);}break;
+  c.button("license_edit",7,control("FileAdmin","ButtonFileAdmin",7),"License Settings");break;
  }
  case UiPage::Mode:{
   const char* variants[]={"ButtonGP","ButtonTA","ButtonVS","ButtonBT"};
@@ -468,12 +530,14 @@ static void composeMenuImpl(const MenuState& s,const UiRaceView& race,std::vecto
  }
  case UiPage::Drift:
   // drift_select's lower clip is the automatic demo, the upper one manual.
-  for(unsigned i=0;i<2;++i){Pose p=control("PadEasy",i==0?"ButtonEasy":"ButtonNormal",i);auto base=c.buttonState("drift",i);c.movieButton(base.c_str(),p);c.movie("drift_movie_",1-i,base.c_str(),"black_base",p);c.movieOverlay(base.c_str(),p);c.text(i==0?"Automatic":"Manual",base.c_str(),p);if(s.cursor==i)c.glow("drift",p,i==0?"Automatic":"Manual");}c.chrome("Drift",UiHelpDrift[std::min(s.cursor,1u)]);
-  {Pose help=control("DriftHelp","DriftHelp");c.panel("drift_help_free",help);c.text("Help","drift_help_free",help);}break;
+  for(unsigned i=0;i<2;++i){Pose p=control("PadEasy",i==0?"ButtonEasy":"ButtonNormal",i);auto base=c.buttonState("drift",i);c.movieButton(base.c_str(),p);c.movie("drift_movie_",1-i,base.c_str(),"black_base",p);c.movieOverlay(base.c_str(),p);c.text(i==0?"Automatic":"Manual",base.c_str(),p);if(s.cursor==i)c.glow("drift",p,i==0?"Automatic":"Manual");}c.chrome("Drift",UiHelpDrift[std::min(s.cursor,2u)]);
+  c.button("drift_help",2,control("DriftHelp","DriftHelp",2),"Help");break;
  case UiPage::VSMode:case UiPage::BattleMode:{
   bool battle=s.page==UiPage::BattleMode;const char* names[]={battle?"Balloon Battle":"Solo Race",battle?"Coin Runners":"Team Race"};
   for(unsigned i=0;i<2;++i){Pose p=control(battle?"BattleSelect":"VSSelect",battle?(i?"ButtonCoin":"ButtonBalloon"):(i?"ButtonTeam":"ButtonIndividual"),i);auto base=c.buttonState(battle?"battle":"vs",i);c.movieButton(base.c_str(),p);c.movie(battle?"battle_mode_movie_":"vs_movie_",i,base.c_str(),"black_base",p);c.movieOverlay(base.c_str(),p);c.text(names[i],base.c_str(),p);if(s.cursor==i)c.glow(battle?"battle":"vs",p,names[i]);}
-  c.chrome(battle?"Battle":"VS");break;
+  c.chrome(battle?"Battle":"VS",s.cursor==2?UiHelpRules[battle]:battle?UiHelpBattleMode[s.cursor]:UiHelpVSMode[s.cursor]);
+  // The corner Rules button (RuleSetting) opens the optional rules page; it overlaps the top bar.
+  c.button("drift_help",2,control("RuleSetting","ButtonRuleSetting",2),"Rules");break;
  }
  case UiPage::Rules:{
   // Pages::VSSettings / BattleSettings: RadioBase rows with their RadioOption
@@ -624,13 +688,21 @@ static void composeMenuImpl(const MenuState& s,const UiRaceView& race,std::vecto
   {const uint32_t ms=s.ghostMilliseconds;char time[16];std::snprintf(time,sizeof time,"%u'%02u\"%03u",unsigned(ms/60000),unsigned(ms/1000%60),unsigned(ms%1000));
    c.chars(time,"ghost_info",info,0xffffffff,"time");}
   const unsigned driver=std::min(s.ghostDriver,25u),weight=UiCharacters[driver].weight;
-  c.text(UiCharacters[driver].name,"ghost_info",info,0xffffffff,"player");
+  // A staff ghost's card names its Mii (the RKG's); the license's own names the character.
+  const unsigned staff=std::min(s.selection.course,31u)*2+(s.ghostSource==2?1:0);
+  c.text(s.ghostSource&&*StaffGhostInfos[staff].name?StaffGhostInfos[staff].name:UiCharacters[driver].name,"ghost_info",info,0xffffffff,"player");
   c.icon("driver_",driver,"ghost_info","chara",info,1,true);
   {const unsigned vehicle=std::min(s.ghostVehicle,11u);char key[32];std::snprintf(key,sizeof key,"vehicle_%c%u","sml"[weight],vehicle);
    const auto first=q.size();c.inPane(key,"ghost_info","machine",info,1,true);
    if(q.size()>first){auto& icon=q.back();icon.vehicleIcon=vehicle;icon.vehicleColor0=0;icon.vehicleColor1=0xffffffffu;}}
   for(unsigned i=0;i<3;++i)c.button("ghost",i,control("TimeAttackGhostList",variants[i]),names[i]);
-  c.chrome("Ghosts");break;
+  // More than one ghost: page arrows and "1/2" (TimeAttackGhostListArrow*, PageNum).
+  if(s.ghostCount>1){
+   c.panel("ghost_arrow_left_free",control("TimeAttackGhostListArrowLeft","ButtonArrowLeft"));c.panel("ghost_arrow_right_free",control("TimeAttackGhostListArrowRight","ButtonArrowRight"));
+   const Pose page=control("TimeAttackGhostListPageNum","TimeAttackGhostListPageNum");c.panel("ghost_page",page);
+   char number[8];std::snprintf(number,sizeof number,"%u/%u",s.ghostPage+1,s.ghostCount);c.chars(number,"ghost_page",page,0xffffffff,"close_number");
+  }
+  c.chrome("Ghosts",s.ghostCount>1?"Left / Right: change the ghost.":"");break;
  }
  case UiPage::Confirm:{
   c.panel("confirm_back",control("RaceConfirmBack","BlackBack"));
@@ -641,11 +713,80 @@ static void composeMenuImpl(const MenuState& s,const UiRaceView& race,std::vecto
   c.button("confirm",0,control("MenuEndConfirm","ButtonOK"),"OK");break;
  }
  case UiPage::Pause:{
-  c.chrome("Pause");const char* variants[]={"ButtonContinue","ButtonRestart","ButtonQuit"};
-  // The native port has three actions. Retain that layout, while using the
-  // original race controller's delays and shared common_w004 animations.
-  for(unsigned i=0;i<3;++i){auto p=control(uiPauseMenuControl(s),variants[i]);p.y=90.f-float(i)*85;
-   c.button("button",i,p,i==0?"Continue":i==1?"Restart":"Quit");}break;
+  // Retail's pause has no title bar: the controller picture above the buttons,
+  // each label naming what that button does with the current controls.
+  // Only when the buttons leave room above them (Time Trials' five reach the top).
+  const auto pauseButtons=s.pauseMenu();float highest=-1e9f;
+  for(unsigned i=0;i<pauseButtons.count;++i){static constexpr const char* names[]={"ButtonContinue","ButtonRestart","ButtonChangeCourse","ButtonChangeCharacter","ButtonQuit"};
+   highest=std::max(highest,control(uiPauseMenuControl(s),names[unsigned(pauseButtons.buttons[i])]).y);}
+  const auto* picture=uiFindPanel("vita_controls");
+  if(picture&&-(highest+40.f)>=picture->y+picture->h){
+  c.panel("vita_controls");
+  for(const auto& bar:UiControlBars){
+   const char* label=!std::strcmp(bar.button,"Stick")?"Steer":!std::strcmp(bar.button,"D-pad")?"Trick":!std::strcmp(bar.button,"START")?"Pause":nullptr;
+   for(unsigned b=0;!label&&b<ControlButtonCount;++b)if(!std::strcmp(bar.button,ControlButtonNames[b]))
+    for(unsigned a=0;a<ControlActionCount;++a)if(unsigned(controls().active()[a])==b)label=ControlActionNames[a];
+   if(label)c.label(label,bar.x+bar.w/2,bar.y+1.5f,bar.w-8,bar.h-3);
+  }
+  }
+  // The mode's PauseMenu*.brctr places its buttons; the cooked positions are retail's.
+  static constexpr const char* variants[]={"ButtonContinue","ButtonRestart","ButtonChangeCourse","ButtonChangeCharacter","ButtonQuit"};
+  static constexpr const char* captions[]={"Continue","Restart","Change Course","Change Character","Quit"};
+  const auto menu=s.pauseMenu();
+  for(unsigned i=0;i<menu.count;++i){const unsigned b=unsigned(menu.buttons[i]);c.button("button",i,control(uiPauseMenuControl(s),variants[b]),captions[b]);}
+  break;
+ }
+ case UiPage::LicenseSettings:{
+  // Pages::LicenseSettings: Records, Change Mii, Erase License, with the license card beside them.
+  const char* names[]={"Records","Change Mii","Erase License"};const char* variants[]={"ButtonCreateFile","ButtonChangeMii","ButtonDeleteFile"};
+  for(unsigned i=0;i<3;++i){auto p=control("FileAdminTop",variants[i],i);p.x=-130;p.sx*=.7f;p.sy*=.85f;c.button("button",i,p,names[i]);}
+  const unsigned slot=std::min(s.selection.license,3u);Pose card=control("LicenseSelectT","License0");card.x=140;card.y=0;
+  c.licenseCard("license_top_empty",card,progress().license[slot],false);
+  c.chrome("License Settings",s.cursor==0?"View this license's records.":s.cursor==1?"Change this license's Mii.":"Erase this license.");
+  break;
+ }
+ case UiPage::Records:{
+  // Time Trial bests, a cup at a time: each course's row and its time.
+  const auto& l=progress().license[std::min(s.selection.license,3u)];const unsigned cup=std::min(s.recordsCup,RaceCupCount-1);
+  {Pose head=control("VSSettingUpDownBase","UpDownRaceNum");head.y=150;c.panel("rule_row_select",head);c.text(cupName(cup),"rule_row_select",head);}
+  for(unsigned i=0;i<4;++i){
+   const unsigned course=cup*4+i;Pose row=control("VSSettingUpDownBase","UpDownRaceNum");row.y=95.f-55.f*float(i);
+   c.panel("rule_row_free",row);c.text(courseName(course),"rule_row_free",row);
+   const Pose value=child(row,control("VSSettingUpDownValue","Value"));c.panel("rule_value_free",value);
+   char time[16];const uint32_t ms=course<l.bestTimes.size()?l.bestTimes[course]:0;
+   if(ms)std::snprintf(time,sizeof time,"%u:%02u.%03u",unsigned(ms/60000),unsigned(ms/1000%60),unsigned(ms%1000));else std::snprintf(time,sizeof time,"-:--.---");
+   c.chars(time,"rule_value_text",child(value,control("VSSettingUpDownText","Text")));
+  }
+  c.chrome("Records","Left / Right: change the cup.");break;
+ }
+ case UiPage::EraseLicense:{
+  c.chrome("Erase this license?");auto yes=control("YesNoButton","Option0",0),no=control("YesNoButton","Option1",1);
+  yes.x=no.x=0;yes.y=50;no.y=-55;c.button("button",0,yes,"Yes");c.button("button",1,no,"No");break;
+ }
+ case UiPage::Options:{
+  // Two of the shared OK-style buttons, placed where the Yes/No pair sits.
+  c.chrome("Options",s.cursor==0?"Change the race controls.":"Change the game settings.");
+  const char* names[]={"Controls","Settings"};
+  for(unsigned i=0;i<2;++i){auto p=control("YesNoButton",i?"Option1":"Option0",i);p.y=60.f-float(i)*95;c.button("button",i,p,names[i]);}
+  break;
+ }
+ case UiPage::Controls:case UiPage::GameSettings:{
+  // Rules-page rows, each an UpDown value (left/right steps it), then OK.
+  const bool controlsPage=s.page==UiPage::Controls;const unsigned rows=s.count()-1;
+  const float top=controlsPage?150.f:120.f,step=controlsPage?31.f:44.f,scale=controlsPage?.8f:1.f;
+  for(unsigned row=0;row<rows;++row){
+   Pose updown=control("VSSettingUpDownBase","UpDownRaceNum");updown.y=top-step*float(row);updown.sy*=scale;
+   const bool focused=row==s.cursor;const char* rowBase=focused?"rule_row_select":"rule_row_free";
+   c.panel(rowBase,updown);c.text(s.settingLabel(row),rowBase,updown);
+   const Pose value=child(updown,control("VSSettingUpDownValue","Value"));
+   c.panel(focused?"rule_value_select":"rule_value_free",value);
+   c.panel(focused?"rule_left_select":"rule_left_free",child(updown,control("VSSettingUpDownButtonL","LeftButton")));
+   c.panel(focused?"rule_right_select":"rule_right_free",child(updown,control("VSSettingUpDownButtonR","RightButton")));
+   c.text(s.settingValue(row),"rule_value_text",child(value,control("VSSettingUpDownText","Text")));
+  }
+  c.button("button",rows,control("VSSetting","ButtonOK",rows),"OK");
+  c.chrome(controlsPage?"Controls":"Settings",controlsPage?(controls().custom?"Classic: Square brakes, Circle looks behind.":"Default: Circle brakes, Square looks behind."):"Left / Right: change the setting.");
+  break;
  }
  case UiPage::QuitConfirm:{
   c.chrome("Quit this race?");auto yes=control("YesNoButton","Option0"),no=control("YesNoButton","Option1");
@@ -656,6 +797,7 @@ static void composeMenuImpl(const MenuState& s,const UiRaceView& race,std::vecto
  default:break;
  }
  c.notice();c.unlocked();
+ if(s.messageOpen&&s.page==UiPage::Drift)c.message(UiMessageDriftHelp);
 }
 void composeMenu(const MenuState& s,const UiRaceView& race,std::vector<UiQuad>& q){composeMenuImpl(s,race,q,nullptr);}
 void composeMenu(const MenuState& s,const UiRaceView& race,std::vector<UiQuad>& q,const UiTransitionView& t){composeMenuImpl(s,race,q,&t);}

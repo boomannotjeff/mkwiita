@@ -54,6 +54,9 @@ COOK_STEPS=[
  ('water mipmaps',['{py}','tools/cook_water_mipmaps.py'],['build/water-mipmaps/receipt.json']),
  ('drivers',['{py}','tools/cook_roster.py','{disc}',SD],[SD+'/models/roster.json']),
  ('karts and bikes',['{py}','tools/cook_garage.py','{disc}',SD,'--jobs','{jobs}'],[SD+'/models/garage.json']),
+ # Staff ghosts: the disc's runs, replayed on this PC into raceable ghosts (needs a C++ compiler).
+ ('time trial ghosts',['{py}','tools/extract_disc.py','{disc}','data/extracted','--prefix','Race/TimeAttack/'],['data/extracted/Race/TimeAttack/ghost2/ghost2_comp_31.rkg']),
+ ('staff ghost runs',['{py}','tools/cook_staff_ghost_runs.py'],[SD+'/ghosts/staff/course_31_expert.mkg']),
  ('full roster',['{py}','tools/cook_full_roster.py','--jobs','{jobs}'],['build/roster']),
  ('race racer lighting',['{py}','tools/cook_racer_lighting.py','--jobs','{jobs}'],['build/roster/models/garage.json']),
  ('vehicle shadows',['{py}','tools/cook_vehicle_shadows.py','--jobs','{jobs}'],['build/vehicle-shadows/models/vehicle-shadows.json']),

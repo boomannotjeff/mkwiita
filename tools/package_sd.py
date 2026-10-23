@@ -32,6 +32,8 @@ if (ROOT/'build/mkw-3ds.3dsx').is_file():files[ROOT/'build/mkw-3ds.3dsx']=Path('
 catalog=json.loads((assets/'models/course-catalog.json').read_text())
 if catalog.get('version')!=1 or len(catalog.get('courses',[]))!=sum(c.get('selected',c['cooked']) for c in courses(False)):raise ValueError('Import all 32 races and 10 arenas before packaging')
 files[assets/'models/course-catalog.json']=Path('models/course-catalog.json')
+# Staff ghosts (tools/cook_staff_ghost_runs.py), when this PC could build their replay tool.
+for ghost in sorted((assets/'ghosts/staff').glob('course_*.mkg')):files[ghost]=Path('ghosts/staff')/ghost.name
 models=['coconut_palm_000','coconut_escalator_000']
 for course in catalog['courses']:
  # A Retro Rewind track that failed to import is listed as not available (tools/import_courses.py).

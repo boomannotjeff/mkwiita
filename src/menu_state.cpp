@@ -1,5 +1,6 @@
 #include <mkw/menu_ui.hpp>
 #include <mkw/progress.hpp>
+#include <mkw/controls.hpp>
 #include <mkw/course_catalog.hpp>
 #include <mkw/garage_skins.hpp>
 #include <algorithm>
@@ -24,6 +25,10 @@ bool bikesOnly(const UiSelection& s){return s.mode==UiMode::GrandPrix&&s.engineC
 bool cupOpen(const UiSelection& s,unsigned cup){return s.mode==UiMode::TimeTrials?progress().anyClassCup(cup):progress().cup(unsigned(s.engineClass),cup);}
 
 unsigned moveMainMenu(unsigned cursor,const UiInput& key){
+ // License Settings (slot 7) sits above the top row's right end.
+ const unsigned settings=unsigned(UiMainMenuControls.size());
+ if(cursor==settings)return key.down||key.left?3:cursor;
+ if(key.up&&cursor<4)return settings;
  const auto& origin=UiMainMenuControls[cursor];
  if(key.up||key.down){
   // There are two visual rows, with different child counts. Choose the
@@ -136,18 +141,57 @@ unsigned MenuState::ruleChoice(UiRuleRow row)const{
 unsigned MenuState::count()const{
  switch(page){
  case UiPage::Rules:return ruleSlot(ruleRows()-1,0)+1;
- case UiPage::License:case UiPage::Mode:case UiPage::EngineClass:return 4;
+ case UiPage::License:return Progress::Licenses+1; // the four licenses and Options
+ case UiPage::Mode:case UiPage::EngineClass:return 4;
+ case UiPage::Options:return 2;
+ case UiPage::Controls:return 2; // the preset, OK
+ case UiPage::GameSettings:return 4;
  case UiPage::Results:return finalRace?1:2;
- case UiPage::MainMenu:return unsigned(UiMainMenuControls.size());
+ case UiPage::MainMenu:return unsigned(UiMainMenuControls.size())+1; // the tiles and License Settings
+ case UiPage::LicenseSettings:return 3;
+ case UiPage::EraseLicense:return 2;
  case UiPage::Character:return unsigned(UiCharacterDrivers.size());
  case UiPage::Vehicle:return kartsOnly(selection)||bikesOnly(selection)?6:12;
- case UiPage::VSMode:case UiPage::BattleMode:case UiPage::BattleCup:case UiPage::Drift:case UiPage::QuitConfirm:return 2;
+ // VS/Battle mode: the two modes and the corner Rules button; Drift: the two types and Help.
+ case UiPage::VSMode:case UiPage::BattleMode:case UiPage::Drift:return 3;
+ case UiPage::BattleCup:case UiPage::QuitConfirm:return 2;
  case UiPage::Cup:return std::min(CupsPerPage,RaceCupCount-cupPage*CupsPerPage);
  case UiPage::Course:return 4;
  case UiPage::BattleStage:return 5;
  case UiPage::Ghost:return ghostAvailable?3:1; // without a ghost only Solo is offered
- case UiPage::Pause:return 3;
+ case UiPage::Pause:return pauseMenu().count;
  default:return 1;
+ }
+}
+
+UiPauseMenu MenuState::pauseMenu()const{
+ static constexpr UiPauseButton TimeTrials[]={UiPauseButton::Continue,UiPauseButton::Restart,UiPauseButton::ChangeCourse,UiPauseButton::ChangeCharacter,UiPauseButton::Quit};
+ static constexpr UiPauseButton Other[]={UiPauseButton::Continue,UiPauseButton::Quit};
+ return selection.mode==UiMode::TimeTrials?UiPauseMenu{TimeTrials,5}:UiPauseMenu{Other,2};
+}
+
+const char* MenuState::settingLabel(unsigned row)const{
+ if(row+1>=count())return "OK";
+ if(page==UiPage::Controls)return "Controls";
+ constexpr const char* labels[]={"Framerate","Minimap","Unlock Everything"};
+ return labels[std::min(row,2u)];
+}
+const char* MenuState::settingValue(unsigned row)const{
+ if(page==UiPage::Controls)return controls().custom?"Classic":"Default";
+ switch(row){
+ case 0:return settings.framerate60?"60 FPS":"30 FPS";
+ case 1:return settings.wiiMap?"Wii":"Outline";
+ default:return progress().unlockAll?"On":"Off";
+ }
+}
+void MenuState::stepSetting(unsigned row,int direction){
+ (void)direction; // every setting has two values
+ if(page==UiPage::Controls){controls().custom=!controls().custom;return;}
+ switch(row){
+ case 0:settings.framerate60=!settings.framerate60;break;
+ case 1:settings.wiiMap=!settings.wiiMap;break;
+ case 2:progress().unlockAll=!progress().unlockAll;break;
+ default:break;
  }
 }
 
@@ -193,7 +237,7 @@ void MenuState::advance(unsigned ticks){age+=ticks;focusAge+=ticks;uiFocusAdvanc
 
 void MenuState::enter(UiPage next){
  normalize(selection);
- page=next;age=focusAge=0;unavailable=locked=false;cursor=0;
+ page=next;age=focusAge=0;unavailable=locked=messageOpen=false;cursor=0;
  switch(page){
  case UiPage::License:cursor=selection.license;break;
  case UiPage::Mode:cursor=unsigned(selection.mode);break;
@@ -211,7 +255,7 @@ void MenuState::enter(UiPage next){
  case UiPage::BattleCup:cursor=selection.battleStage/5;break;
  case UiPage::BattleStage:cursor=selection.battleStage%5;break;
  case UiPage::Ghost:cursor=ghostAvailable?std::min(unsigned(selection.ghost),2u):0;break;
- case UiPage::QuitConfirm:cursor=1;break;
+ case UiPage::QuitConfirm:case UiPage::EraseLicense:cursor=1;break;
  default:break;
  }
  uiFocusReset(*this);
@@ -222,16 +266,22 @@ UiAction MenuState::input(UiInput key){
  cursor=std::min(cursor,count()-1);
  if(unlockNotice>=0){if(key.accept||key.back||key.start)unlockNotice=-1;return UiAction::None;}
  if(page==UiPage::Race){if(key.start)enter(UiPage::Pause);return UiAction::None;}
+ if(messageOpen){if(key.accept||key.back)messageOpen=false;return UiAction::None;}
  if(page==UiPage::Pause&&(key.start||key.back)){enter(UiPage::Race);return UiAction::ResumeRace;}
  if(key.back){
   switch(page){
   case UiPage::Intro:case UiPage::License:enter(UiPage::Title);break;
   case UiPage::MainMenu:enter(UiPage::License);break;
+  case UiPage::Options:enter(UiPage::License);cursor=Progress::Licenses;break;
+  case UiPage::LicenseSettings:enter(UiPage::MainMenu);cursor=unsigned(UiMainMenuControls.size());break;
+  case UiPage::Records:enter(UiPage::LicenseSettings);break;
+  case UiPage::EraseLicense:enter(UiPage::LicenseSettings);cursor=2;break;
+  case UiPage::Controls:case UiPage::GameSettings:{const unsigned at=page==UiPage::Controls?0:1;settingsChanged=true;enter(UiPage::Options);cursor=at;break;}
   case UiPage::Mode:enter(UiPage::MainMenu);break;
   case UiPage::EngineClass:case UiPage::VSMode:case UiPage::BattleMode:enter(UiPage::Mode);break;
-  case UiPage::Rules:enter(selection.mode==UiMode::Battle?UiPage::BattleMode:UiPage::VSMode);break;
+  case UiPage::Rules:enter(selection.mode==UiMode::Battle?UiPage::BattleMode:UiPage::VSMode);cursor=2;break;
   case UiPage::Character:
-   enter(selection.mode==UiMode::GrandPrix?UiPage::EngineClass:selection.mode==UiMode::VS||selection.mode==UiMode::Battle?UiPage::Rules:UiPage::Mode);break;
+   enter(selection.mode==UiMode::GrandPrix?UiPage::EngineClass:selection.mode==UiMode::VS?UiPage::VSMode:selection.mode==UiMode::Battle?UiPage::BattleMode:UiPage::Mode);break;
   case UiPage::Vehicle:enter(UiPage::Character);break;
   case UiPage::Drift:enter(UiPage::Vehicle);break;
   case UiPage::Cup:case UiPage::BattleCup:enter(UiPage::Drift);break;
@@ -241,7 +291,7 @@ UiAction MenuState::input(UiInput key){
   case UiPage::Confirm:case UiPage::Error:
    if(autoCourse(selection)){enter(UiPage::Drift);break;}
    enter(selection.mode==UiMode::GrandPrix?UiPage::Cup:selection.mode==UiMode::Battle?UiPage::BattleStage:selection.mode==UiMode::TimeTrials?UiPage::Ghost:UiPage::Course);break;
-  case UiPage::QuitConfirm:enter(UiPage::Pause);cursor=2;break;
+  case UiPage::QuitConfirm:enter(UiPage::Pause);cursor=pauseMenu().count-1;break;
   default:break;
   }
   return UiAction::None;
@@ -282,6 +332,16 @@ UiAction MenuState::input(UiInput key){
  if(page==UiPage::Cup&&(key.pageLeft||key.pageRight)&&CupPages>1){
   cupPage=(cupPage+(key.pageLeft?CupPages-1:1))%CupPages;cursor=std::min(cursor,count()-1);
   focusAge=0;unavailable=false;uiFocusReset(*this);
+  return UiAction::None;
+ }
+ if(page==UiPage::Ghost&&ghostCount>1&&(key.left||key.right||key.pageLeft||key.pageRight)){
+  showGhost((ghostPage+(key.left||key.pageLeft?ghostCount-1:1))%ghostCount);focusAge=0;return UiAction::None;
+ }
+ if(page==UiPage::Records&&(key.left||key.right||key.pageLeft||key.pageRight)){
+  recordsCup=(recordsCup+(key.left||key.pageLeft?RaceCupCount-1:1))%RaceCupCount;focusAge=0;return UiAction::None;
+ }
+ if((page==UiPage::Controls||page==UiPage::GameSettings)&&(key.left||key.right)){
+  if(cursor+1<count()){stepSetting(cursor,key.left?-1:1);focusAge=0;}
   return UiAction::None;
  }
  if(page==UiPage::Rules&&(key.up||key.down||key.left||key.right)){
@@ -328,9 +388,18 @@ UiAction MenuState::input(UiInput key){
  case UiPage::Title:enter(UiPage::License);break;
  case UiPage::License:
   // An empty slot asks for a name first (main shows the keyboard, then creates it).
+  if(cursor==Progress::Licenses){enter(UiPage::Options);break;}
   if(!progress().license[std::min(cursor,Progress::Licenses-1)].used){nameRequest=true;break;}
   selection.license=cursor;enter(UiPage::MainMenu);break;
- case UiPage::MainMenu:if(cursor==0)enter(UiPage::Mode);else unavailable=true;break;
+ case UiPage::MainMenu:if(cursor==0)enter(UiPage::Mode);else if(cursor==UiMainMenuControls.size())enter(UiPage::LicenseSettings);else unavailable=true;break;
+ // Records, Change Mii (needs Mii support) and Erase License.
+ case UiPage::LicenseSettings:if(cursor==0){recordsCup=0;enter(UiPage::Records);}else if(cursor==1)unavailable=true;else enter(UiPage::EraseLicense);break;
+ case UiPage::Records:enter(UiPage::LicenseSettings);break;
+ case UiPage::EraseLicense:if(cursor==0){eraseRequest=true;enter(UiPage::License);}else{enter(UiPage::LicenseSettings);cursor=2;}break;
+ case UiPage::Options:enter(cursor==0?UiPage::Controls:UiPage::GameSettings);break;
+ case UiPage::Controls:case UiPage::GameSettings:
+  if(cursor+1<count()){stepSetting(cursor,1);break;}
+  {const unsigned at=page==UiPage::Controls?0:1;settingsChanged=true;enter(UiPage::Options);cursor=at;}break;
  case UiPage::Mode:
   if(!raceMode(UiMode(cursor))){unavailable=true;break;}
   selection.mode=UiMode(cursor);
@@ -339,10 +408,13 @@ UiAction MenuState::input(UiInput key){
   if(!raceEngineClass(slotClass(cursor))){unavailable=true;break;}
   if(slotClass(cursor)==UiEngineClass::Mirror&&!progress().mirror()){unavailable=locked=true;break;}
   selection.engineClass=slotClass(cursor);selection.cc200=slotCC200(cursor);enter(UiPage::Character);break;
+ // The rules are optional, behind the corner Rules button (RuleSetting), as in retail.
  case UiPage::VSMode:
-  selection.teams=cursor==1;enter(UiPage::Rules);break;
+  if(cursor==2){enter(UiPage::Rules);break;}
+  selection.teams=cursor==1;enter(UiPage::Character);break;
  case UiPage::BattleMode:
-  selection.coinRunners=cursor==1;enter(UiPage::Rules);break;
+  if(cursor==2){enter(UiPage::Rules);break;}
+  selection.coinRunners=cursor==1;enter(UiPage::Character);break;
  case UiPage::Rules:{
   // A radio option becomes the row's choice; OK goes on to the characters.
   unsigned row,option;ruleCursor(row,option);
@@ -355,7 +427,7 @@ UiAction MenuState::input(UiInput key){
   case UiRuleRow::Courses:selection.courseOrder=option;break;
   case UiRuleRow::Items:selection.itemMode=option;break;
   case UiRuleRow::Count:break;
-  case UiRuleRow::Ok:enter(UiPage::Character);break;
+  case UiRuleRow::Ok:enter(selection.mode==UiMode::Battle?UiPage::BattleMode:UiPage::VSMode);cursor=2;break;
   }
   break;
  }
@@ -369,8 +441,9 @@ UiAction MenuState::input(UiInput key){
   if(!progress().vehicle(UiCharacters[std::min(selection.driver,unsigned(UiCharacters.size()-1))].weight,vehicleChoice(cursor))){unavailable=locked=true;break;}
   selection.vehicle=vehicleChoice(cursor);enter(UiPage::Drift);break;
  case UiPage::Drift:
+  if(cursor==2){messageOpen=true;break;} // Help: the drift explanation window
   selection.automatic=cursor==0;
-  if(autoCourse(selection)){nextCourse(selection,true,age+focusAge*7919u);enter(UiPage::Confirm);break;}
+  if(autoCourse(selection)){nextCourse(selection,true,age+focusAge*7919u+entropy);enter(UiPage::Confirm);break;}
   enter(selection.mode==UiMode::Battle?UiPage::BattleCup:UiPage::Cup);break;
  case UiPage::Cup:{
   // A Grand Prix selects the whole cup. VS and Time Trials select a course.
@@ -384,25 +457,30 @@ UiAction MenuState::input(UiInput key){
   if(!Courses[selection.course/4*4+cursor].supported){unavailable=true;break;}
   selection.course=selection.course/4*4+cursor;enter(selection.mode==UiMode::TimeTrials?UiPage::Ghost:UiPage::Confirm);break;
  case UiPage::Ghost:
-  selection.ghost=ghostAvailable?cursor:2;enter(UiPage::Confirm);break;
+  selection.ghost=ghostAvailable?cursor:2;selection.ghostSource=ghostSource;enter(UiPage::Confirm);break;
  case UiPage::BattleCup:
   if(selection.battleStage/5!=cursor)selection.battleStage=cursor*5;
   enter(UiPage::BattleStage);break;
  case UiPage::BattleStage:selection.battleStage=selection.battleStage/5*5+cursor;enter(UiPage::Confirm);break;
  case UiPage::Confirm:if(supportsRace())return UiAction::StartRace;unavailable=true;break;
  case UiPage::Pause:
-  if(cursor==0){enter(UiPage::Race);return UiAction::ResumeRace;}
-  if(cursor==1)return UiAction::RestartRace;
-  enter(UiPage::QuitConfirm);break;
+  switch(pauseMenu().buttons[cursor]){
+  case UiPauseButton::Continue:enter(UiPage::Race);return UiAction::ResumeRace;
+  case UiPauseButton::Restart:return UiAction::RestartRace;
+  case UiPauseButton::ChangeCourse:enter(UiPage::Cup);break;
+  case UiPauseButton::ChangeCharacter:enter(UiPage::Character);break;
+  case UiPauseButton::Quit:enter(UiPage::QuitConfirm);break;
+  }
+  break;
  case UiPage::QuitConfirm:
-  if(cursor==0)enter(UiPage::MainMenu);else{enter(UiPage::Pause);cursor=2;}break;
+  if(cursor==0)enter(UiPage::MainMenu);else{enter(UiPage::Pause);cursor=pauseMenu().count-1;}break;
  case UiPage::Results:
   // RaceMenu::OnButtonClick (USA 0x80838664): Next goes to the VS course
   // choice (section 0x4B); Quit and the final race's Next return to the
   // menus (section 0x41). A Grand Prix's award ceremony runs in between (main.cpp).
   // A Grand Prix goes straight on to the cup's next course.
   if(cursor==0&&!finalRace&&selection.mode==UiMode::GrandPrix){selection.course=selection.course/4*4+std::min(selection.course%4+1,3u);enter(UiPage::Confirm);return UiAction::StartRace;}
-  if(cursor==0&&!finalRace&&autoCourse(selection)){nextCourse(selection,false,age+focusAge*7919u);enter(UiPage::Confirm);return UiAction::StartRace;}
+  if(cursor==0&&!finalRace&&autoCourse(selection)){nextCourse(selection,false,age+focusAge*7919u+entropy);enter(UiPage::Confirm);return UiAction::StartRace;}
   if(cursor==0&&!finalRace)enter(selection.mode==UiMode::Battle?UiPage::BattleCup:UiPage::Cup);
   else enter(UiPage::MainMenu);
   break;

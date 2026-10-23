@@ -565,7 +565,7 @@ void RaceBottomScreen::drawMini(Renderer& renderer,const BottomView& view){
     for(unsigned i=0;i<std::min(view.coins,BottomView::MaxCoins);++i){
         float x=m.miniOx+pad+(view.coin[i][0]-m.miniX0)*m.miniScale;const float y=m.miniOy+pad+(view.coin[i][1]-m.miniZ0)*m.miniScale;
         if(m.mirror)x=2*miniAxis-x;
-        const auto& w=RaceMapWhite;constexpr float H=1.5f;
+        const auto& w=RaceMapWhite;constexpr float H=1.f;
         set(quads[count++],x-H,y-H,x+H,y+H,(w.x+1)/aw,(w.y+1)/ah,(w.x+w.w-1)/aw,(w.y+w.h-1)/ah,0xffd820ffu);
     }
     auto rim=[](const BottomRacer& r,bool local){constexpr uint32_t Team[2]={0xe82828ffu,0x2870ffffu};return r.team<2?Team[r.team]:local?0x000000ffu:0u;};

@@ -31,6 +31,12 @@ constexpr uint8_t ItemPairResponses[15][15]={
     {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0},
 };
 bool blueFlight(const ItemActor& a){return a.kind==ItemKind::BlueShell&&!a.explosion&&!a.diving();}
+// A resting item was pushed out of the floor last frame, so this frame's
+// contact test misses it; probe just below to keep it settled in place.
+bool restingOnFloor(const ItemActor& a,ItemWorldQuery query){
+    if(!a.settled||!query)return false;
+    return length(query(a.position,a.position-normalized(a.up,{0,1,0})*4.f,a.terrainRadius).floorNormal)>.1f;
+}
 uint8_t pairResponse(ItemKind source,ItemKind target){
     return ItemPairResponses[retailObjectId(source)][retailObjectId(target)];
 }
@@ -144,15 +150,17 @@ void RaceItems::shatter(ItemActor& a){
 void RaceItems::updateScattered(ItemActor& a,ItemWorldQuery query){
     // Shared source scatter state 292310: advance, XZ damping, gravity.
     // Complex moving-floor/sloped-wall callbacks remain in the source audit.
+    if(restingOnFloor(a,query)){a.velocity={};return;}
     a.position+=a.velocity;a.velocity.x*=.995f;a.velocity.z*=.995f;
     const auto surface=query?query(a.previous,a.position,a.terrainRadius):ItemSurface{};
     if(surface.kill||surface.cannon){a.active=false;return;}
     a.position+=surface.correction;
     if(length(surface.floorNormal)>.1f){
-        const auto n=normalized(surface.floorNormal);a.velocity=tangent(a.velocity,n);a.settled=true;a.up=n;
-        // A dropped trap lands and stays (ObjThrowable::OnFinishThrow); only shells and boosts slide on.
-        if(trapItem(a.kind)){a.velocity={};a.scattered=false;sound(ItemSoundCue::Land,a);}
-    }else a.velocity.y=std::max(-100.f,a.velocity.y-2.2f);
+        const auto n=normalized(surface.floorNormal);a.velocity={};a.up=n;
+        // A dropped item lands and stays, as in retail (#21); traps go back to their normal update.
+        if(trapItem(a.kind)){a.scattered=false;sound(ItemSoundCue::Land,a);}
+        a.settled=true;
+    }else{a.settled=false;a.velocity.y=std::max(-100.f,a.velocity.y-2.2f);}
     if(length(surface.wallNormal)>.1f){const auto n=normalized(surface.wallNormal);float into=dot(a.velocity,n);if(into<0)a.velocity=a.velocity-n*(2*into);}
 }
 void RaceItems::updateActors(ItemWorldQuery query){
@@ -236,6 +244,7 @@ void RaceItems::updateActor(ItemActor& a,ItemWorldQuery query){
                         }
                     }else if(into<0)a.velocity=a.velocity-normal*into;
                 }else if(a.kind==ItemKind::GreenShell)a.velocity.y-=a.velocity.y>0?4.2f:2.f;
+                else if(trapItem(a.kind)&&restingOnFloor(a,query))a.velocity={};
                 else if(trapItem(a.kind)){
                     a.settled=false;
                     const float gravity=a.kind==ItemKind::Banana?(a.backwards?1.8f:2.2f):a.kind==ItemKind::FakeBox?(a.backwards?1.8f:2.1f):(a.backwards?2.8f:2.3f);
@@ -282,7 +291,8 @@ void RaceItems::resolveActorPair(ItemActor& a,ItemActor& b){
     const Vec3 normal=normalized(delta,normalized(a.velocity-b.velocity,{1,0,0}));
     const Vec3 oldAVelocity=a.velocity,oldBVelocity=b.velocity;
     auto apply=[&](ItemActor& victim,uint8_t response,Vec3 away,Vec3 otherVelocity){
-        if(response==1)bumpItem(victim,away,otherVelocity);
+        // Items resting on the ground are not shoved along by other items (#21).
+        if(response==1&&!victim.settled)bumpItem(victim,away,otherVelocity);
         else if(response==2){
             if(victim.explosion)return; // The source has separate blast phase overrides.
             if(blastItem(victim.kind))explode(victim);
@@ -304,7 +314,7 @@ void RaceItems::resolveActorHeld(ItemActor& actor,unsigned owner,unsigned slot){
     const uint8_t heldResponse=pairResponse(heldKind,actor.kind);
     const Vec3 normal=normalized(actor.position-state.positions[slot],
                                  normalized(actor.velocity-racers_[owner].velocity,{1,0,0}));
-    if(actorResponse==1)bumpItem(actor,normal,{});
+    if(actorResponse==1&&!actor.settled)bumpItem(actor,normal,{});
     else if(actorResponse==2&&!actor.explosion){
         if(blastItem(actor.kind))explode(actor);
         else{actor.active=false;sound(ItemSoundCue::Break,actor);events_.push_back({ItemEffect::Break,uint8_t(actor.owner<0?12:actor.owner),uint16_t(actor.kind),actor.position,-1,actor.scale});}

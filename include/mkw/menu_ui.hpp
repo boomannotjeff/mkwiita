@@ -1,10 +1,11 @@
 #pragma once
 #include <mkw/menu_focus.hpp>
+#include <algorithm>
 #include <array>
 #include <vector>
 #include <cstdint>
 namespace mkw {
-enum class UiPage {Title,MainMenu,Mode,Character,Vehicle,Drift,Cup,Course,Confirm,Race,Pause,QuitConfirm,Results,Error,Strap,License,EngineClass,VSMode,BattleMode,BattleCup,BattleStage,Ghost,Intro,Rules};
+enum class UiPage {Title,MainMenu,Mode,Character,Vehicle,Drift,Cup,Course,Confirm,Race,Pause,QuitConfirm,Results,Error,Strap,License,EngineClass,VSMode,BattleMode,BattleCup,BattleStage,Ghost,Intro,Rules,Options,Controls,GameSettings,LicenseSettings,Records,EraseLicense};
 enum class UiAction {None,StartRace,RestartRace,ResumeRace,Exit};
 enum class UiMode {GrandPrix,TimeTrials,VS,Battle};
 enum class UiEngineClass {CC50,CC100,CC150,Mirror};
@@ -28,6 +29,8 @@ struct UiSelection {
  unsigned cpuLevel=1,cpuVehicles=0,courseOrder=0,itemMode=0,raceCount=4,battleWins=2;
  // Time Trials: 0 race the course's ghost, 1 watch its replay, 2 alone.
  unsigned ghost=2;
+ // ...from the Ghost page's card: 0 the license's own, 1 the staff ghost, 2 the expert staff ghost.
+ unsigned ghostSource=0;
  // The retail unlocked engine-class page switches both 50cc/100cc entries
  // together between their restricted type and the combined kart/bike list.
  bool mixedEngineTypes=false;
@@ -70,6 +73,10 @@ inline constexpr const char* UiVehicleNames[3][12]={
  {"Standard Kart L","Offroader","Flame Flyer","Standard Bike L","Flame Runner","Wario Bike","Piranha Prowler","Jetsetter","Honeycoupe","Shooting Star","Spear","Phantom"}
 };
 inline constexpr const char* UiBattleStageNames[]={"Block Plaza","Delfino Pier","Funky Stadium","Chain Chomp Wheel","Thwomp Desert","SNES Battle Course 4","GBA Battle Course 3","N64 Skyscraper","GCN Cookie Land","DS Twilight House"};
+// Pause buttons in screen order (PauseMenu*.brctr): only Time Trials offers
+// Restart, Change Course and Change Character; the other modes Continue / Quit.
+enum class UiPauseButton {Continue,Restart,ChangeCourse,ChangeCharacter,Quit};
+struct UiPauseMenu {const UiPauseButton* buttons;unsigned count;};
 // Platform-independent navigation. Scene mutation is exclusively handled by main.
 class MenuState {
 public:
@@ -81,6 +88,21 @@ public:
  bool locked=false;
  // An empty license slot was chosen: main asks for its name, then creates it.
  bool nameRequest=false;
+ // A message window over the page (the Drift page's Help): A or B closes it.
+ bool messageOpen=false;
+ // Options (from the license page): settings main keeps in quality.txt and save.bin.
+ // Controls live in mkw::controls(); settingsChanged asks main to apply and save them.
+ struct Settings {bool framerate60=true,wiiMap=true;} settings{};
+ bool settingsChanged=false;
+ // Clock noise from main for Random courses: page ages alone repeat after every race.
+ unsigned entropy=0;
+ // Erase License was confirmed: main erases selection.license and saves.
+ bool eraseRequest=false;
+ // Records: the cup whose Time Trial bests are shown.
+ unsigned recordsCup=0;
+ // Controls / GameSettings rows: a label and its value (left/right steps it); OK last.
+ const char* settingLabel(unsigned row)const;const char* settingValue(unsigned row)const;
+ void stepSetting(unsigned row,int direction);
  // An "Unlocked!" notice over the page (a Progress unlockable, -1 none): A or B closes it.
  int unlockNotice=-1;
  // Results is the retail VS end-of-race menu (VSRaceEnd): Next Race / Quit
@@ -89,6 +111,12 @@ public:
  // The chosen course has a saved Time Trial ghost (kept current by main):
  // its racer (UiCharacters index, vehicle choice) and time.
  bool ghostAvailable=false;unsigned ghostDriver=0,ghostVehicle=0;uint32_t ghostMilliseconds=0;
+ // The course's ghost cards (own, staff, expert once unlocked), paged left/right
+ // on the Ghost page; main fills them and showGhost copies one into the fields above.
+ struct GhostCard {unsigned source=0,driver=0,vehicle=0;uint32_t milliseconds=0;};
+ std::array<GhostCard,3> ghostCards{};unsigned ghostCount=0,ghostPage=0,ghostSource=0;
+ void showGhost(unsigned page){ghostPage=ghostCount?std::min(page,ghostCount-1):0;ghostAvailable=ghostCount>0;
+  const auto& g=ghostCards[ghostPage];ghostDriver=g.driver;ghostVehicle=g.vehicle;ghostMilliseconds=g.milliseconds;ghostSource=g.source;}
  UiFocusState focus{};
  UiAction input(UiInput);
  void advance(unsigned ticks);
@@ -101,6 +129,7 @@ public:
  // Its assets must survive every frame of that transition back to gameplay.
  bool retainsRaceAssets()const{return simulates()||page==UiPage::Pause||page==UiPage::QuitConfirm;}
  unsigned count()const;unsigned columns()const;
+ UiPauseMenu pauseMenu()const;
  unsigned characterDriver(unsigned slot)const;
  unsigned vehicleChoice(unsigned slot)const;
  unsigned vehicleSlot(unsigned choice)const;

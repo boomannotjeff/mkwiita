@@ -35,12 +35,16 @@ const char* uiSelectedMenuControl(const MenuState& state,bool back){
  if(back)return "Back";
  switch(state.page){
  case UiPage::Title:return "PressStart";
- case UiPage::License:return state.cursor<2?"LicenseSelectT":"LicenseSelectB";
- case UiPage::MainMenu:return state.cursor==0?"TopMenuSingle":state.cursor<4?"TopMenuMulti":state.cursor<6?"TopMenuWifi":"TopMenuChannel";
+ case UiPage::License:return state.cursor==4?"LicenseSelectS":state.cursor<2?"LicenseSelectT":"LicenseSelectB";
+ case UiPage::Options:return "YesNoButton";
+ case UiPage::Controls:case UiPage::GameSettings:return "VSSetting";
+ case UiPage::MainMenu:return state.cursor==0?"TopMenuSingle":state.cursor<4?"TopMenuMulti":state.cursor<6?"TopMenuWifi":state.cursor<7?"TopMenuChannel":"FileAdmin";
+ case UiPage::LicenseSettings:return "FileAdminTop";
+ case UiPage::EraseLicense:return "YesNoButton";
  case UiPage::Mode:return "SingleTop";
  case UiPage::EngineClass:return "ClassSelect2";
- case UiPage::VSMode:return "VSSelect";
- case UiPage::BattleMode:return "BattleSelect";
+ case UiPage::VSMode:return state.cursor==2?"RuleSetting":"VSSelect";
+ case UiPage::BattleMode:return state.cursor==2?"RuleSetting":"BattleSelect";
  case UiPage::Rules:{
   unsigned row,option;state.ruleCursor(row,option);const bool battle=state.selection.mode==UiMode::Battle;
   if(state.ruleRow(row).row==UiRuleRow::Ok)return battle?"BattleSetting":"VSSetting";
@@ -51,7 +55,7 @@ const char* uiSelectedMenuControl(const MenuState& state,bool back){
   return controls[std::min(state.cursor/8,3u)];
  }
  case UiPage::Vehicle:return state.columns()==2?"MachineSelect2_6":"MachineSelect1_6";
- case UiPage::Drift:return "PadEasy";
+ case UiPage::Drift:return state.cursor==2?"DriftHelp":"PadEasy";
  case UiPage::Cup:return "CupSelectCup";
  case UiPage::Course:return "CourseSelectCourse";
  case UiPage::BattleCup:return "BattleCupSelectCup";

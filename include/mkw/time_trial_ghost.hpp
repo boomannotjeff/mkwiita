@@ -37,10 +37,13 @@ public:
 
     bool valid() const{return milliseconds!=0&&!frames.empty()&&poses.size()==frames.size();}
     void clear(){*this=TimeTrialGhost{};}
-    bool load(unsigned course);
+    // Own: the license's best run; Staff / Expert: the disc's staff ghosts
+    // (tools/cook_staff_ghost_runs.py), ux0:data/mkw/ghosts/staff.
+    enum class Source : unsigned {Own,Staff,Expert};
+    bool load(unsigned course,Source source=Source::Own);
     bool save() const;
     // The header alone: racer and time for the menu, without the run.
-    static bool peek(unsigned course,Header& out);
+    static bool peek(unsigned course,Header& out,Source source=Source::Own);
     static bool exists(unsigned course){Header h;return peek(course,h);}
     const GhostFrame* frame(std::size_t tick) const{return tick<frames.size()?&frames[tick]:nullptr;}
     const GhostPose* pose(std::size_t tick) const{return tick<poses.size()?&poses[tick]:nullptr;}

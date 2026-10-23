@@ -24,7 +24,9 @@
 #include <mkw/race_results.hpp>
 #include <mkw/trick_presentation.hpp>
 #include <mkw/time_trial_ghost.hpp>
+#include <mkw/staff_ghosts.hpp>
 #include <mkw/progress.hpp>
+#include <mkw/controls.hpp>
 #include <mkw/race_items.hpp>
 #include <mkw/star_power.hpp>
 #include <mkw/job_worker.hpp>
@@ -142,6 +144,7 @@ static void applyVitaQuality(){
             else if(n=="animationStep")q.animationStep=unsigned(value);
             else if(n=="framerate")q.framerate=value<45?30u:60u;
             else if(n=="map")q.wiiMap=value!=0;
+            else if(n=="controls_custom")mkw::controls().custom=value!=0;
         }
         fclose(f);
     }
@@ -170,6 +173,7 @@ static bool writeVitaQuality(const mkw::RenderQuality& q,float resolution){
     fprintf(f,"resolution=%.2f\nminScreenRatio=%g\nobjectLowDistance=%g\nshadowVolumes=%d\nbloomBlurRounds=%u\nboxSparkleRatio=%g\nparticleBudget=%d\nkartEffectScreens=%u\nanimationStep=%u\nframerate=%u\nmap=%d\n",
         double(resolution),double(q.minScreenRatio),double(q.objectLowDistance),int(q.shadowVolumes),q.bloomBlurRounds,double(q.boxSparkleRatio),
         q.particleBudget==~0u?-1:int(q.particleBudget),q.kartEffectScreens,q.animationStep,q.framerate,int(q.wiiMap));
+    fprintf(f,"controls_custom=%d\n",int(mkw::controls().custom));
     return fclose(f)==0;
 }
 // The LiveArea's Settings button relaunches the game with "-settings"
@@ -702,10 +706,15 @@ int main() {
     struct ResidencyKey {
         mkw::UiPage page=mkw::UiPage::Strap;unsigned cursor=0;mkw::UiSelection selection{};bool unavailable=false,locked=false;int unlockNotice=-1;
         bool modal=false;mkw::UiPage underlayPage=mkw::UiPage::Strap;unsigned underlayCursor=0;
+        // Page state outside the selection that changes what a page draws (settings values,
+        // a message window, ghost and cup pages): new text must load when it changes.
+        bool messageOpen=false,framerate60=false,wiiMap=false,customControls=false,unlockAll=false;unsigned cupPage=0,ghostPage=0,ghostCount=0,recordsCup=0;
         bool operator==(const ResidencyKey&)const=default;
     };
     auto residencyKey=[](const mkw::MenuState& state,const mkw::MenuState* underlay){
         ResidencyKey key;key.page=state.page;key.cursor=state.cursor;key.selection=state.selection;key.unavailable=state.unavailable;key.locked=state.locked;key.unlockNotice=state.unlockNotice;
+        key.messageOpen=state.messageOpen;key.framerate60=state.settings.framerate60;key.wiiMap=state.settings.wiiMap;key.customControls=mkw::controls().custom;
+        key.unlockAll=mkw::progress().unlockAll;key.cupPage=state.cupPage;key.ghostPage=state.ghostPage;key.ghostCount=state.ghostCount;key.recordsCup=state.recordsCup;
         if(underlay){key.modal=true;key.underlayPage=underlay->page;key.underlayCursor=underlay->cursor;}
         return key;
     };
@@ -811,12 +820,20 @@ int main() {
             {static int ghostCourse=-1;
              if(menu.page==mkw::UiPage::Course||menu.page==mkw::UiPage::Ghost){
               const int course=int(menu.page==mkw::UiPage::Course?menu.selection.course/4*4+menu.cursor:menu.selection.course);
-              if(course!=ghostCourse){ghostCourse=course;mkw::TimeTrialGhost::Header h{};
-               menu.ghostAvailable=mkw::TimeTrialGhost::peek(unsigned(course),h);
-               menu.ghostDriver=menu.ghostAvailable?h.choice/mkw::VehiclesPerDriver:0;menu.ghostVehicle=menu.ghostAvailable?h.choice%mkw::VehiclesPerDriver:0;
-               menu.ghostMilliseconds=menu.ghostAvailable?h.milliseconds:0;}}
+              if(course!=ghostCourse){ghostCourse=course;menu.ghostCount=0;
+               // The license's own ghost, the staff ghost, and the expert one once its time is beaten.
+               using Source=mkw::TimeTrialGhost::Source;
+               const bool expert=!mkw::RetroRewindEdition&&course<32&&mkw::progress().license[mkw::progress().current].bestTimes[course]
+                   &&mkw::progress().license[mkw::progress().current].bestTimes[course]<=mkw::StaffGhosts[course].unlock;
+               for(Source source:{Source::Own,Source::Staff,Source::Expert}){
+                if(source==Source::Expert&&!expert)continue;
+                mkw::TimeTrialGhost::Header h{};if(!mkw::TimeTrialGhost::peek(unsigned(course),h,source))continue;
+                menu.ghostCards[menu.ghostCount++]={unsigned(source),h.choice/mkw::VehiclesPerDriver,h.choice%mkw::VehiclesPerDriver,h.milliseconds};
+               }
+               menu.showGhost(0);}}
              else ghostCourse=-1;}
             const auto beforeInput=menu;
+            menu.entropy=unsigned(svcGetSystemTick());
             auto action=transition.input(menu,input);
             if(menu.nameRequest){
                 menu.nameRequest=false;
@@ -829,6 +846,16 @@ int main() {
             if(naming){char name[11]={};if(const int done=pollNameKeyboard(name)){naming=false;if(done>0)createLicense(name);}}
 #endif
             mkw::progress().current=menu.selection.license;
+            if(menu.eraseRequest){menu.eraseRequest=false;mkw::progress().erase(std::min(menu.selection.license,mkw::Progress::Licenses-1));if(!mkw::progress().save())report("save failed");}
+#ifdef __vita__
+            // Options: show the current settings; apply and save what the pages changed.
+            if(menu.page==mkw::UiPage::Options&&!menu.settingsChanged){const auto& q=mkw::renderQuality();menu.settings={q.framerate==60,q.wiiMap};}
+            if(menu.settingsChanged){
+                menu.settingsChanged=false;auto& q=mkw::renderQuality();
+                q.framerate=menu.settings.framerate60?60:30;q.wiiMap=menu.settings.wiiMap;
+                if(!writeVitaQuality(q,readVitaResolution())||!mkw::progress().save())report("settings save failed");
+            }
+#endif
             // Back in the menus, each new unlock gets its notice.
             if(menu.unlockNotice<0&&!pendingUnlocks.empty()&&revealed&&!transition.active()&&!menu.simulates()&&menu.page!=mkw::UiPage::Pause&&menu.page!=mkw::UiPage::QuitConfirm){
                 menu.unlockNotice=int(pendingUnlocks.front());pendingUnlocks.erase(pendingUnlocks.begin());
@@ -1010,7 +1037,7 @@ int main() {
         itemModeChoice=rules?menu.selection.itemMode:0;
         // Time Trial ghost: raced as racer 1, or watched with its own racer.
         ghostMode=0;ghostRun.clear();
-        if(timeTrial&&menu.selection.ghost<2&&ghostRun.load(courseChoice)){
+        if(timeTrial&&menu.selection.ghost<2&&ghostRun.load(courseChoice,mkw::TimeTrialGhost::Source(menu.selection.ghostSource))){
             ghostMode=menu.selection.ghost==0?1:2;
             if(ghostMode==2){skinChoice=0;driverChoice=ghostRun.choice/mkw::VehiclesPerDriver;vehicleChoice=ghostRun.choice%mkw::VehiclesPerDriver;automaticDrift=ghostRun.driftAuto;}
         }};
@@ -1776,12 +1803,17 @@ int main() {
         // so a stale event costs one recheck and no refresh is ever missed.
         if(fullRace)for(unsigned waits=0;C3D_FrameCounter(0)==lastRefresh&&waits<3;++waits)gspWaitForEvent(GSPGPU_EVENT_VBlank0,false);
         hidScanInput();auto held=hidKeysHeld(),down=hidKeysDown();
-        // Vita race buttons: Circle (3DS B) looks behind, Square (3DS Y) brakes and
-        // reverses, Triangle (3DS X) tricks and wheelies. Menus keep Circle as back.
+        // Vita race buttons follow the control preset (mkw/controls.hpp): each
+        // action's button becomes the key the race reads (A accelerate, B brake,
+        // R drift, L item, X trick, SELECT speedometer). Menus keep Circle as back.
         lookBehind=false;
         if(fullRace&&!autoplay&&menu.page==mkw::UiPage::Race&&!intro.active()){
-            lookBehind=held&KEY_B;
-            auto remap=[](u32 k){return (k&~(KEY_B|KEY_Y))|(k&KEY_Y?u32(KEY_B):0u);};
+            const auto& bound=mkw::controls().active();
+            constexpr u32 physical[]={KEY_A,KEY_B,KEY_Y,KEY_X,KEY_L,KEY_R,KEY_SELECT};
+            constexpr u32 logical[]={KEY_A,KEY_B,0,KEY_R,KEY_L,KEY_X,KEY_SELECT};
+            auto remap=[&](u32 k){u32 out=k&~u32(KEY_A|KEY_B|KEY_X|KEY_Y|KEY_L|KEY_R|KEY_SELECT);
+                for(unsigned a=0;a<mkw::ControlActionCount;++a)if(k&physical[unsigned(bound[a])])out|=logical[a];return out;};
+            lookBehind=held&physical[unsigned(bound[unsigned(mkw::ControlAction::LookBehind)])];
             held=remap(held);down=remap(down);
         }
         const bool endMenu=menu.page==mkw::UiPage::Results&&results.phase()==mkw::RaceFlowPhase::Menu;
@@ -2058,6 +2090,9 @@ int main() {
                         dynamics->setPos({pose->pos[0],pose->pos[1],pose->pos[2]});
                         dynamics->setFullRot(K::EGG::Quatf(pose->fullRot[3],pose->fullRot[0],pose->fullRot[1],pose->fullRot[2]));
                         dynamics->setMainRot(K::EGG::Quatf(pose->mainRot[3],pose->mainRot[0],pose->mainRot[1],pose->mainRot[2]));
+                        // The drawn kart reads the physics pose matrix; rebuild it from the pinned
+                        // pose, or the model lags the camera (which follows the pinned position).
+                        objects->object(racer)->physics()->updatePose();
                     }
                 }
                 {
@@ -2193,7 +2228,7 @@ int main() {
                             vsSet.next=results.chosen()==0&&!results.finalRace();battleSet.next=battleMode&&vsSet.next;
                             if(results.chosen()==0&&results.finalRace()&&!teamVs&&!battleMode&&!timeTrial)queueCeremony(); // GP, and solo VS (ours)
                             else if(results.chosen()==0&&results.finalRace()&&(teamVs||battleMode))queueTeamCeremony();
-                            if(menu.page==mkw::UiPage::Results){menu.cursor=unsigned(std::max(0,results.chosen()));nextRaceQueued=menu.input({false,false,false,false,true})==mkw::UiAction::StartRace;}
+                            if(menu.page==mkw::UiPage::Results){menu.cursor=unsigned(std::max(0,results.chosen()));menu.entropy=unsigned(svcGetSystemTick());nextRaceQueued=menu.input({false,false,false,false,true})==mkw::UiAction::StartRace;}
                         }
                         flowUi.step(results);
                     }
@@ -2278,6 +2313,8 @@ int main() {
                 signals.bike=bike;signals.wheelie=kart->status().onBit(K::Kart::eStatus::WheelieRot);
                 signals.airborne=kart->status().offBit(K::Kart::eStatus::TouchingGround);
                 signals.hopping=kart->status().onBit(K::Kart::eStatus::Hop);
+                signals.launched=kart->status().onBit(K::Kart::eStatus::InCannon,K::Kart::eStatus::JumpPad);
+                signals.insideDrift=kart->param()->stats().driftType==K::Kart::KartParam::Stats::DriftType::Inside_Drift_Bike;
                 signals.steering=kart->inputs()->currentState().stick.x;
                 signals.speed=kart->move()->speed();
                 signals.drift=kart->status().onBit(K::Kart::eStatus::DriftManual,K::Kart::eStatus::DriftAuto);
