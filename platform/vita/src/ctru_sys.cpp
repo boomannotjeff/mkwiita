@@ -215,10 +215,13 @@ extern "C" void hidScanInput(void) {
 	circle.dx = stickAxis(pad.lx);
 	circle.dy = s16(-stickAxis(pad.ly));
 	// The 3DS HID module reports the Circle Pad as directions past about a quarter throw.
-	if (circle.dx >= 40) keys |= KEY_CPAD_RIGHT;
-	if (circle.dx <= -40) keys |= KEY_CPAD_LEFT;
-	if (circle.dy >= 40) keys |= KEY_CPAD_UP;
-	if (circle.dy <= -40) keys |= KEY_CPAD_DOWN;
+	// Only the stick's dominant axis counts as a direction: a diagonal would
+	// otherwise press two at once (menus moving and paging in the same frame).
+	const bool horizontal = (circle.dx < 0 ? -circle.dx : circle.dx) >= (circle.dy < 0 ? -circle.dy : circle.dy);
+	if (horizontal && circle.dx >= 40) keys |= KEY_CPAD_RIGHT;
+	if (horizontal && circle.dx <= -40) keys |= KEY_CPAD_LEFT;
+	if (!horizontal && circle.dy >= 40) keys |= KEY_CPAD_UP;
+	if (!horizontal && circle.dy <= -40) keys |= KEY_CPAD_DOWN;
 	const int rx = stickAxis(pad.rx), ry = -stickAxis(pad.ry);
 	if (rx >= 40) keys |= KEY_CSTICK_RIGHT;
 	if (rx <= -40) keys |= KEY_CSTICK_LEFT;

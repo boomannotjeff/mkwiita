@@ -2058,6 +2058,9 @@ int main() {
                         dynamics->setPos({pose->pos[0],pose->pos[1],pose->pos[2]});
                         dynamics->setFullRot(K::EGG::Quatf(pose->fullRot[3],pose->fullRot[0],pose->fullRot[1],pose->fullRot[2]));
                         dynamics->setMainRot(K::EGG::Quatf(pose->mainRot[3],pose->mainRot[0],pose->mainRot[1],pose->mainRot[2]));
+                        // The drawn kart reads the physics pose matrix; rebuild it from the pinned
+                        // pose, or the model lags the camera (which follows the pinned position).
+                        objects->object(racer)->physics()->updatePose();
                     }
                 }
                 {
@@ -2278,6 +2281,8 @@ int main() {
                 signals.bike=bike;signals.wheelie=kart->status().onBit(K::Kart::eStatus::WheelieRot);
                 signals.airborne=kart->status().offBit(K::Kart::eStatus::TouchingGround);
                 signals.hopping=kart->status().onBit(K::Kart::eStatus::Hop);
+                signals.launched=kart->status().onBit(K::Kart::eStatus::InCannon,K::Kart::eStatus::JumpPad);
+                signals.insideDrift=kart->param()->stats().driftType==K::Kart::KartParam::Stats::DriftType::Inside_Drift_Bike;
                 signals.steering=kart->inputs()->currentState().stick.x;
                 signals.speed=kart->move()->speed();
                 signals.drift=kart->status().onBit(K::Kart::eStatus::DriftManual,K::Kart::eStatus::DriftAuto);
