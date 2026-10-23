@@ -2283,7 +2283,7 @@ int main() {
                 signals.bike=bike;signals.wheelie=kart->status().onBit(K::Kart::eStatus::WheelieRot);
                 signals.airborne=kart->status().offBit(K::Kart::eStatus::TouchingGround);
                 signals.hopping=kart->status().onBit(K::Kart::eStatus::Hop);
-                signals.launched=kart->status().onBit(K::Kart::eStatus::InCannon,K::Kart::eStatus::JumpPad);
+                signals.launched=kart->status().onBit(K::Kart::eStatus::InCannon);
                 signals.insideDrift=kart->param()->stats().driftType==K::Kart::KartParam::Stats::DriftType::Inside_Drift_Bike;
                 signals.steering=kart->inputs()->currentState().stick.x;
                 signals.speed=kart->move()->speed();

@@ -99,7 +99,7 @@ void RacerVisuals::step(unsigned tick){
         r->vehicle.step(*kart);DriverSignals s;
         s.bike=kart->param()->isBike();s.wheelie=status.onBit(K::Kart::eStatus::WheelieRot); // pose: see main.cpp
         s.airborne=status.offBit(K::Kart::eStatus::TouchingGround);s.hopping=status.onBit(K::Kart::eStatus::Hop);
-        s.launched=status.onBit(K::Kart::eStatus::InCannon,K::Kart::eStatus::JumpPad);
+        s.launched=status.onBit(K::Kart::eStatus::InCannon);
         s.insideDrift=kart->param()->stats().driftType==K::Kart::KartParam::Stats::DriftType::Inside_Drift_Bike;
         s.steering=kart->inputs()->currentState().stick.x;s.speed=kart->move()->speed();
         s.drift=status.onBit(K::Kart::eStatus::DriftManual,K::Kart::eStatus::DriftAuto);s.driftDirection=kart->move()->hopStickX();
