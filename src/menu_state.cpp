@@ -370,7 +370,7 @@ UiAction MenuState::input(UiInput key){
   selection.vehicle=vehicleChoice(cursor);enter(UiPage::Drift);break;
  case UiPage::Drift:
   selection.automatic=cursor==0;
-  if(autoCourse(selection)){nextCourse(selection,true,age+focusAge*7919u);enter(UiPage::Confirm);break;}
+  if(autoCourse(selection)){nextCourse(selection,true,age+focusAge*7919u+entropy);enter(UiPage::Confirm);break;}
   enter(selection.mode==UiMode::Battle?UiPage::BattleCup:UiPage::Cup);break;
  case UiPage::Cup:{
   // A Grand Prix selects the whole cup. VS and Time Trials select a course.
@@ -402,7 +402,7 @@ UiAction MenuState::input(UiInput key){
   // menus (section 0x41). A Grand Prix's award ceremony runs in between (main.cpp).
   // A Grand Prix goes straight on to the cup's next course.
   if(cursor==0&&!finalRace&&selection.mode==UiMode::GrandPrix){selection.course=selection.course/4*4+std::min(selection.course%4+1,3u);enter(UiPage::Confirm);return UiAction::StartRace;}
-  if(cursor==0&&!finalRace&&autoCourse(selection)){nextCourse(selection,false,age+focusAge*7919u);enter(UiPage::Confirm);return UiAction::StartRace;}
+  if(cursor==0&&!finalRace&&autoCourse(selection)){nextCourse(selection,false,age+focusAge*7919u+entropy);enter(UiPage::Confirm);return UiAction::StartRace;}
   if(cursor==0&&!finalRace)enter(selection.mode==UiMode::Battle?UiPage::BattleCup:UiPage::Cup);
   else enter(UiPage::MainMenu);
   break;

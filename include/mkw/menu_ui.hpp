@@ -77,6 +77,8 @@ public:
  unsigned cursor=0,age=0,focusAge=0;bool unavailable=false;
  // The Cup page shows eight cups: cupPage picks which (more than one page only in the Retro Rewind edition).
  unsigned cupPage=0;
+ // Clock noise from main for Random courses: page ages alone repeat after every race.
+ unsigned entropy=0;
  // The choice is not unlocked for this license (the notice says "Locked").
  bool locked=false;
  // An empty license slot was chosen: main asks for its name, then creates it.

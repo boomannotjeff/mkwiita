@@ -292,7 +292,7 @@ void CourseObjects::Impl::link(){
         std::memcpy(v.resources,set->resources,sizeof v.resources);v.resources[sizeof v.resources-1]=0;
         std::strncpy(v.resource,v.resources,sizeof v.resource-1);
         if(char* semicolon=std::strchr(v.resource,';'))*semicolon=0;
-        if(!std::strcmp(v.resource,"coin")&&(!coins||coinPlacements++%2))continue; // every other placement: half the arena's coins
+        if(!std::strcmp(v.resource,"coin")&&(!coins||coinPlacements++%4))continue; // every fourth placement: a quarter of the arena's coins
         v.placement=placementMatrix(*geo);
         if(classifyObject(v,assets,course))visuals.push_back(v);
     }

@@ -12,6 +12,8 @@ struct DriverSignals {
     int driftDirection=0; // Kinoko hopStickX convention: +1 left, -1 right.
     bool drift=false,boost=false,trick=false,hit=false,finished=false;
     bool bike=false,wheelie=false,airborne=false,hopping=false;
+    bool launched=false;    // Cannon: the only airtime that plays jump_st/jump (not jump pads or boost ramps).
+    bool insideDrift=false; // Inside-drift bike (KartParam DriftType): no outward leg in a drift.
     bool accelerating=false,braking=false,countdown=false;
     int trickVariant=-1; // Optional authored sjump_a/b/c selection, 0..2.
     int finishType=0; // 0 first, 1 good (2nd..5th), 2 bad (6th..12th).
@@ -72,8 +74,12 @@ public:
         // A drift hop is already present in the vehicle's physics pose. Playing
         // the full takeoff/landing body clips on every hop adds a second lurch.
         if(s.bike&&s.airborne&&!previous_.airborne){
-            jumpAirborne_=!s.hopping;
+            // Rolling off a ramp or bump keeps the driving pose (#20); only a launch flails.
+            jumpAirborne_=!s.hopping&&s.launched;
             if(jumpAirborne_&&!s.trick)startOneShot(JumpStart);
+        }else if(s.bike&&s.airborne&&s.launched&&!jumpAirborne_&&!s.trick){
+            // A cannon entered mid-air (off a ramp) flails from the cannon on.
+            jumpAirborne_=true;startOneShot(JumpStart);
         }
         if(s.bike&&!s.airborne&&previous_.airborne&&!s.trick){
             if(airTrick_)startOneShot(BikeTrickEnd);
@@ -98,9 +104,12 @@ public:
         } else if(s.hit) {
             wanted=Damage;oneShot_=Count;
         } else if(oneShot_!=Count)wanted=oneShot_;
-        else if(s.bike&&s.airborne&&(jumpAirborne_||airTrick_))wanted=Jump;
+        // Flailing legs (jump) are for cannons only; after a trick the rider rides until sjump_ed.
+        else if(s.bike&&s.airborne&&jumpAirborne_)wanted=Jump;
         else if(s.bike&&s.wheelie){wanted=Wheelie;parameterized=true;}
         else if(s.speed < -0.05f) {wanted=Back;parameterized=true;}
+        // KartModel::vf_1c leans inside-drift bikes in; drift_l/r is the outside-drift leg-out pose.
+        else if(s.drift&&s.bike&&s.insideDrift){wanted=Drive;parameterized=true;}
         else if(s.drift) {wanted=s.driftDirection>0?DriftLeft:DriftRight;parameterized=true;}
         else if(s.boost) {wanted=Dash;parameterized=true;}
         else if(s.countdown||(!s.accelerating&&std::fabs(s.speed)<0.05f))wanted=Wait;

@@ -29,7 +29,7 @@ else()
   set(MKW_DATA_ROOT "ux0:data/mkw")
   set(MKW_SCE_SYS ${CMAKE_SOURCE_DIR}/platform/vita/sce_sys)
 endif()
-set(VITA_VERSION "01.40")
+set(VITA_VERSION "01.41")
 option(MKW_RELEASE "No test hooks or runtime log" OFF)
 
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
