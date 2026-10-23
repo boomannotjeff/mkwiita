@@ -111,7 +111,7 @@ unsigned RaceIntro::frames()const{
 void RaceIntro::start(){
  stop();
  if(opening_<0)return;
- active_=true;shots_=0;begin(opening_);
+ active_=true;shots_=0;ticks_=0;begin(opening_);
  // Nothing is shown before the first tick positions the camera; start from
  // the authored placement so an early frame is never undefined.
  const auto& c=cameras_[current_];
@@ -143,6 +143,7 @@ void RaceIntro::begin(int index){
 
 void RaceIntro::step(){
  if(!active_)return;
+ ++ticks_;
  const auto& c=cameras_[current_];
  if(c.glide){
   const float t=c.time>0?std::min(elapsed_/c.time,1.f):1.f;

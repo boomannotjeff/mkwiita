@@ -144,7 +144,7 @@ unsigned MenuState::count()const{
  case UiPage::License:return Progress::Licenses+1; // the four licenses and Options
  case UiPage::Mode:case UiPage::EngineClass:return 4;
  case UiPage::Options:return 2;
- case UiPage::Controls:return 2; // the preset, OK
+ case UiPage::Controls:return ControlActionCount+1; // the actions, OK
  case UiPage::GameSettings:return 4;
  case UiPage::Results:return finalRace?1:2;
  case UiPage::MainMenu:return unsigned(UiMainMenuControls.size())+1; // the tiles and License Settings
@@ -172,25 +172,25 @@ UiPauseMenu MenuState::pauseMenu()const{
 
 const char* MenuState::settingLabel(unsigned row)const{
  if(row+1>=count())return "OK";
- if(page==UiPage::Controls)return "Controls";
+ if(page==UiPage::Controls)return ControlActionNames[row];
  constexpr const char* labels[]={"Framerate","Minimap","Unlock Everything"};
  return labels[std::min(row,2u)];
 }
 const char* MenuState::settingValue(unsigned row)const{
- if(page==UiPage::Controls)return controls().custom?"Classic":"Default";
+ if(page==UiPage::Controls)return ControlButtonNames[unsigned(controls().active()[row])];
  switch(row){
  case 0:return settings.framerate60?"60 FPS":"30 FPS";
  case 1:return settings.wiiMap?"Wii":"Outline";
- default:return progress().unlockAll?"On":"Off";
+ default:return settings.unlockAll?"On":"Off";
  }
 }
 void MenuState::stepSetting(unsigned row,int direction){
  (void)direction; // every setting has two values
- if(page==UiPage::Controls){controls().custom=!controls().custom;return;}
+ if(page==UiPage::Controls){binding=int(row);return;} // main binds the next button pressed
  switch(row){
  case 0:settings.framerate60=!settings.framerate60;break;
  case 1:settings.wiiMap=!settings.wiiMap;break;
- case 2:progress().unlockAll=!progress().unlockAll;break;
+ case 2:settings.unlockAll=!settings.unlockAll;break;
  default:break;
  }
 }
@@ -237,7 +237,7 @@ void MenuState::advance(unsigned ticks){age+=ticks;focusAge+=ticks;uiFocusAdvanc
 
 void MenuState::enter(UiPage next){
  normalize(selection);
- page=next;age=focusAge=0;unavailable=locked=messageOpen=false;cursor=0;
+ page=next;age=focusAge=0;unavailable=locked=messageOpen=false;binding=-1;cursor=0;
  switch(page){
  case UiPage::License:cursor=selection.license;break;
  case UiPage::Mode:cursor=unsigned(selection.mode);break;
@@ -340,7 +340,7 @@ UiAction MenuState::input(UiInput key){
  if(page==UiPage::Records&&(key.left||key.right||key.pageLeft||key.pageRight)){
   recordsCup=(recordsCup+(key.left||key.pageLeft?RaceCupCount-1:1))%RaceCupCount;focusAge=0;return UiAction::None;
  }
- if((page==UiPage::Controls||page==UiPage::GameSettings)&&(key.left||key.right)){
+ if(page==UiPage::GameSettings&&(key.left||key.right)){
   if(cursor+1<count()){stepSetting(cursor,key.left?-1:1);focusAge=0;}
   return UiAction::None;
  }

@@ -37,6 +37,8 @@ public:
  // QA: total authored length in frames, and the shot index being shown.
  unsigned frames()const;
  int shot()const{return current_;}
+ // Ticks since start() (the banner fades on these).
+ unsigned ticks()const{return ticks_;}
 private:
  struct Camera {
   std::uint8_t type=0,next=0xff,route=0xff;std::uint16_t pathSpeed=0,fovSpeed=0,viewSpeed=0;
@@ -48,7 +50,7 @@ private:
  void repairIntro(const std::uint8_t* kmp,std::size_t size);
  void begin(int index);
  std::vector<Camera> cameras_;
- int opening_=-1,current_=-1;unsigned shots_=0;
+ int opening_=-1,current_=-1;unsigned shots_=0,ticks_=0;
  bool active_=false;
  float elapsed_=0,fov_=60,appliedFov_=60,viewDistance_=0;
  Vec3 eye_,target_,viewOffset_;

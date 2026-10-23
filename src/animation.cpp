@@ -155,6 +155,7 @@ bool DriverAnimation::load(const char* path,const Model& model){
     if(cursor!=size){reset();return false;}
     for(unsigned i=0;i<model.submeshes.size();++i)baseTextures_[i]=model.submeshes[i].texture;
     handleDrive_=find("handle_drive");dash_=find("dash");shake_=find("shake");
+    stripHandlePivot();
     return ready=true;
 }
 namespace {
@@ -186,6 +187,20 @@ bool inversePair(float* out,const float* m){
     }
     return true;
 }
+}
+// Most bikes' handle_drive only steers the handle, which VehicleAnimation
+// places at the bike's display pivot. The Wario Bike's also bakes that pivot
+// (its neutral frame tilts 32 degrees and sits at 0,99,82), so the handle was
+// offset twice and floated off the bike. Every frame is pivot x steer: keep
+// the steer by removing the neutral (middle) frame's transform.
+void DriverAnimation::stripHandlePivot(){
+    if(handleDrive_<0||matrices_!=1)return;
+    const Clip& c=clips_[handleDrive_];
+    const unsigned stride=matrices_*84+shapes_*4;
+    float* neutral=reinterpret_cast<float*>(const_cast<uint8_t*>(c.data)+(c.count/2)*stride);
+    if(neutral[3]*neutral[3]+neutral[7]*neutral[7]+neutral[11]*neutral[11]<1.f)return;
+    float inverse[21];if(!inversePair(inverse,neutral))return;
+    for(unsigned f=0;f<c.count;++f){float* m=reinterpret_cast<float*>(const_cast<uint8_t*>(c.data)+f*stride);multiplyPair(m,inverse,m);}
 }
 void DriverAnimation::evaluate(const Clip& c,unsigned a,unsigned b,float t,unsigned tick,float blend){
     const unsigned stride=matrices_*84+shapes_*4;

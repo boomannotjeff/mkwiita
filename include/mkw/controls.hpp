@@ -16,8 +16,13 @@ inline constexpr ControlBindings DefaultControls{{ControlButton::Cross,ControlBu
 // Classic: 1.4.0's layout (Square brakes, Circle looks behind).
 inline constexpr ControlBindings ClassicControls{{ControlButton::Cross,ControlButton::Square,ControlButton::Circle,ControlButton::R,ControlButton::L,ControlButton::Triangle,ControlButton::Select}};
 struct ControlSettings {
-    bool custom=false; // the Classic preset (quality.txt controls_custom)
-    const ControlBindings& active()const{return custom?ClassicControls:DefaultControls;}
+    ControlBindings bindings=DefaultControls; // quality.txt control_<action>=<button>
+    const ControlBindings& active()const{return bindings;}
+    // The action takes the button; the action that had it gets this action's old one, so none is lost.
+    void bind(ControlAction action,ControlButton button){
+        for(auto& b:bindings)if(b==button)b=bindings[size_t(action)];
+        bindings[size_t(action)]=button;
+    }
 };
 inline ControlSettings& controls(){static ControlSettings value;return value;}
 }

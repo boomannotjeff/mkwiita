@@ -37,7 +37,7 @@ int main(int argc,char** argv){
   s.selection.itemMode=variant%(mode==unsigned(UiMode::Battle)?3:4);
   s.selection.raceCount=UiRaceCounts[variant%UiRaceCounts.size()];s.selection.battleWins=UiBattleWins[variant%UiBattleWins.size()];
   // Options: both control presets and every settings value.
-  controls().custom=variant%2;s.settings={variant%2==0,variant/2%2==0};progress().unlockAll=variant/4%2;s.recordsCup=variant%RaceCupCount;
+  s.binding=page==UiPage::Controls?int(variant%(ControlActionCount+1))-1:-1;s.settings={variant%2==0,variant/2%2==0,variant/4%2!=0};progress().unlockAll=variant/4%2;s.recordsCup=variant%RaceCupCount;
   // License cards: every trophy colour in every cell, the cups open or not.
   for(unsigned l=0;l<2;++l){auto& lic=progress().license[l];lic.used=true;lic.name[0]='A';lic.name[1]=0;
    for(unsigned k=0;k<4;++k)for(unsigned c=0;c<8;++c)lic.trophy[k][c]=uint8_t((variant+k+c+l)%4*(variant%3!=0));}

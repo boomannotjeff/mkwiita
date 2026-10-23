@@ -461,6 +461,48 @@ def cook_results(out, manifest, header):
     manifest['results'] = {'textures': textures, 'sources': {p.relative_to(ROOT).as_posix(): digest(p) for p in sources}}
 
 
+def cook_intro(out, manifest, header):
+    """The course preview's banner (demo/cup_name.brlyt and course_name.brlyt):
+    the mode line beside its icon and the course name. Both texts are
+    kart_kanji_font messages (the layouts' rodan subset has no digits); the
+    icons are demo/timg's cup, flag and battle icons. Resident with the race."""
+    demo = UI / 'Race/demo'
+    font_path = UI / 'Font/kart_kanji_font.brfnt'
+    # shortcut: printable ASCII only (course names with accents lose them), add them when a catalog needs it.
+    info, glyphs = font_glyphs(font_path, ''.join(chr(i) for i in range(32, 127)))
+    atlas, rects = pack_atlas({c: g['image'] for c, g in glyphs.items()})
+    icon_names = ['tt_cup_icon_kinoko_00', 'tt_cup_icon_flower_00', 'tt_cup_icon_star_00', 'tt_cup_icon_oukan_00',
+                  'tt_cup_icon_koura_00', 'tt_cup_icon_banana_00', 'tt_cup_icon_konoha_00', 'tt_cup_icon_thunder_00',
+                  'st_battle_icon_flag', 'st_battle_icon_balloon', 'st_battle_icon_coin']
+    # The 128px art is drawn at 64 layout units (about 76 Vita pixels).
+    icon_atlas, icon_rects = pack_atlas({i: decode_tpl(demo / f'timg/{n}.tpl').resize((64, 64), 1) for i, n in enumerate(icon_names)}, padding=0)
+    textures = [texture_file(atlas, 'flow_intro_font', out, 'la4'), texture_file(icon_atlas, 'flow_intro_icons', out, 'rgba8')]
+    sources = [font_path, demo / 'blyt/cup_name.brlyt', demo / 'blyt/course_name.brlyt'] + [demo / f'timg/{n}.tpl' for n in icon_names]
+    panes = {p['name']: p for name in ('cup_name', 'course_name') for p in parse_layout(demo / f'blyt/{name}.brlyt')['panes']}
+    cup, course, icon = panes['cup_name'], panes['course_name'], panes['cup_icon']
+    header += [
+        '// Course preview banner (tools/cook_race_flow.py cook_intro). Textures: font atlas, icon atlas.',
+        f'inline constexpr std::array<const char*,2> FlowIntroTextures{{{{"{textures[0]}","{textures[1]}"}}}};',
+        'inline constexpr FlowGlyph FlowIntroGlyphs[]={',
+    ]
+    for c in sorted(glyphs):
+        x, y, _, _ = rects[c]
+        g = glyphs[c]
+        header.append(f'    {{u\'{c if c not in chr(39) + chr(92) else chr(92) + c}\',{x},{y},{g["width"]},{g["left"]},{g["advance"]}}},')
+    header.append('};')
+    header.append(f'inline constexpr FlowFont FlowIntroFont{{0,{atlas.size[0]},{atlas.size[1]},{info["cellH"]},{info["width"]},'
+                  f'{info["height"]},{info["linefeed"]},FlowIntroGlyphs,{len(glyphs)}}};')
+    header.append('// Icon atlas rects (x,y,w,h): the 8 retail cups, then the VS flag, balloon and coin.')
+    header.append('inline constexpr std::array<std::array<int16_t,4>,11> FlowIntroIcons{{' +
+                  ','.join('{{' + ','.join(str(v) for v in icon_rects[i]) + '}}' for i in range(len(icon_names))) + '}};')
+    header.append(f'inline constexpr uint16_t FlowIntroIconAtlas[2]={{{icon_atlas.size[0]},{icon_atlas.size[1]}}};')
+    header.append('// The layouts\' font size, icon size and text colours (C1; the glyphs carry their outline).')
+    header.append(f'inline constexpr float FlowIntroFontW={f(cup["font"][0])},FlowIntroFontH={f(cup["font"][1])},FlowIntroIconSize={f(icon["values"][8])};')
+    colours = {m['name']: rgba(m['c1']) for name in ('cup_name', 'course_name') for m in parse_layout(demo / f'blyt/{name}.brlyt')['materials']}
+    header.append(f'inline constexpr uint32_t FlowIntroCupColor=0x{colours["cup_name"]:08x}u,FlowIntroCourseColor=0x{colours["course_name"]:08x}u;')
+    manifest['intro'] = {'textures': textures, 'sources': {p.relative_to(ROOT).as_posix(): digest(p) for p in sources}}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', type=Path, default=ROOT / 'build/race-flow')
@@ -472,6 +514,7 @@ def main():
               '#pragma once', '#include <array>', '#include <cstdint>', 'namespace mkw {']
     cook_wipe(out, manifest, header)
     cook_results(out, manifest, header)
+    cook_intro(out, manifest, header)
     header.append('}')
     (ROOT / 'include/mkw/race_flow_layout.hpp').write_text('\n'.join(header) + '\n')
     (out / 'race-flow.json').write_text(json.dumps(manifest, indent=2) + '\n')

@@ -535,7 +535,7 @@ def main():
                   'UiHelpRulesCount':[0xd89,0xd8a],'UiHelpRulesOk':[0xd90,0xd91],'UiHelpRules':[0xd92,0xd93]})
  help_text={name:[menu_messages[i] for i in ids] for name,ids in help_ids.items()}
  # Message windows (common_w017_message): multi-line texts, baked one line at a time.
- message_text={'UiMessageDriftHelp':menu_messages[0xced]}
+ message_text={'UiMessageDriftHelp':menu_messages[0xced],'UiMessageBindControl':'Press a button to bind it.'}
  message_lines=[l for v in message_text.values() for l in v.split('\n') if l]
  multiline_specs={menu_messages[i]:.7 for i in range(0x8fd,0x901)}
  multiline_specs.update({menu_messages[i]:.5 for i in range(0xbbe,0xbc4)})
@@ -578,7 +578,7 @@ def main():
  # Staff ghosts' Mii names for the ghost card (tools/cook_staff_ghost_runs.py).
  staff_info=ROOT/'include/mkw/staff_ghost_info.hpp'
  staff_names=[json.loads('"'+n+'"') for n in re.findall(r'\{"((?:[^"\\]|\\.)+)",\{',staff_info.read_text(encoding='utf-8'))] if staff_info.is_file() else []
- options_help=['Left / Right: change the ghost.',"View this license's records.","Change this license's Mii.",'Erase this license.','Left / Right: change the cup.','Change the race controls.','Change the game settings.','Classic: Square brakes, Circle looks behind.','Default: Circle brakes, Square looks behind.','Left / Right: change the setting.']
+ options_help=['Left / Right: change the ghost.',"View this license's records.","Change this license's Mii.",'Erase this license.','Left / Right: change the cup.','Change the race controls.','Change the game settings.','Choose an action, then press its button.','Classic: Square brakes, Circle looks behind.','Default: Circle brakes, Square looks behind.','Left / Right: change the setting.']
  roles={
   'header_text':['Main Menu','Select License','Characters','Vehicles','Engine Classes','Cups','Courses','Drift','Grand Prix','Time Trials','Single Player','VS','Battle','Stages','Ghosts','Wii Stages','Retro Stages','Select Stage','Start Race','Rules','Options','Controls','Settings','License Settings','Records','Erase this license?'],
   'rule_row':rule_rows+setting_rows+course_names+['Mushroom Cup','Flower Cup','Star Cup','Special Cup','Shell Cup','Banana Cup','Leaf Cup','Lightning Cup']+rr_cups,'rule_option':rule_options+(['200cc'] if RR else []),'rule_option_on':rule_options+(['200cc'] if RR else []),'rule_value_text':rule_counts+setting_values+list('0123456789:.-'),
@@ -589,7 +589,7 @@ def main():
   'class_switch':['Switch'],
   'license':['NEW','New','License','License 1','License 2','License 3','License 4','50cc','100cc','150cc','Mirror'],
   'option':['Settings','Options'],'license_edit':['License Settings'],
-  'drift_help':['Help','Rules'],'message':message_lines,
+  'drift_help':['Help','Rules'],'message':message_lines+controls_strings('ControlActionNames'),
   # License names are set per character (Composer::chars), from the keyboard's allowed set.
   'license_top_empty':['NEW','50cc','100cc','150cc','Mirror']+list(LICENSE_NAME_CHARS),'license_bottom_empty':['NEW','50cc','100cc','150cc','Mirror']+list(LICENSE_NAME_CHARS),
   'character_name':character_labels,'vehicle_name':vehicle_labels,

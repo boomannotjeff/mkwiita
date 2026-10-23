@@ -373,11 +373,9 @@ public:
    at=end?end+1:at+len;}
  }
  // A license card (common_w076): its name, the cup icons ("?" until unlocked) and
- // the trophy grid; selected, retail's glow frame over the plain card.
+ // the trophy grid; selected, the card's select state.
  void licenseCard(const char* family,Pose p,const License& l,bool selected){
-  const Name base(family,"_free");panel(base,p);
-  if(selected)if(const auto* r=uiFindPanel(Name(family,"_selectin_waku_light_01"))){const auto first=out.size();
-   layer(r->key,*r,base,p,1);for(auto i=first;i<out.size();++i)out[i].additive=true;}
+  const Name base(family,selected?"_select":"_free");panel(base,p);
   if(!l.used){text("NEW",base,p,0xffffffff,"new");return;}
   chars(l.name,base,p,0xffffffff,"player");
   static constexpr const char* cups[]={"n_0_kinoko","n_1_flower","n_2_star","n_3_special","r_0_koura","r_1_banana","r_2_konoha","r_3_thunder"};
@@ -458,7 +456,7 @@ static void composeMenuImpl(const MenuState& s,const UiRaceView& race,std::vecto
  case UiPage::MainMenu:{
   const char* titles[]={"Single Player","Multiplayer","Nintendo WFC","Mario Kart Channel"};
   const char* groups[]={"TopMenuSingleWaku","TopMenuMultiWaku","TopMenuWifiWaku","TopMenuChannelWaku"};
-  for(unsigned i=0;i<4;++i){Pose p=control(groups[i],groups[i],UiFocusMainParentBase+i);c.panel("main_free",p);for(const char* field:{"text_sha","text","text_light"})c.text(titles[i],"main",p,0xffffffff,field);
+  for(unsigned i=0;i<4;++i){Pose p=control(groups[i],groups[i],UiFocusMainParentBase+i);c.panel("main_free",p);for(const char* field:{"text_sha","text","text_00"})c.text(titles[i],"main",p,0xffffffff,field); // text_00 (Null_00) is the full-white title over the half-alpha "text"; text_light's focus flash is left out (user preference)
    if(i==0){auto b=child(p,control("TopMenuSingle","ButtonSingle",0));auto base=c.buttonState("main_button",0);c.movieButton(base.c_str(),b);c.movie("main_movie_",0,base.c_str(),"black_base",b);c.movieOverlay(base.c_str(),b);c.text("1\nPlayer",base.c_str(),b);if(s.cursor==0)c.glow("main_button",b,"1\nPlayer");}
    if(i==1||i==2){unsigned n=i==1?3:2;for(unsigned k=0;k<n;++k){char v[48];std::snprintf(v,sizeof v,i==1?"ButtonMulti%uP":"ButtonWifi%uP",k+(i==1?2:1));Pose b=child(p,control(i==1?"TopMenuMulti":"TopMenuWifi",v,i==1?1+k:4+k));const auto slot=i==1?1+k:4+k;auto base=c.buttonState(i==1?"main_multi":"main_wifi",slot);c.movieButton(base.c_str(),b);c.movie("main_movie_",slot,base.c_str(),"black_base",b);c.movieOverlay(base.c_str(),b);char caption[20];const unsigned players=k+(i==1?2:1);std::snprintf(caption,sizeof caption,"%u\n%s",players,players==1?"Player":"Players");c.text(caption,base.c_str(),b);if(s.cursor==slot)c.glow(i==1?"main_multi":"main_wifi",b,caption);}}
    if(i==3){Pose b=child(p,control("TopMenuChannel","ButtonChannel",6));auto base=c.buttonState("main_button",6);c.movieButton(base.c_str(),b);c.movie("main_movie_",6,base.c_str(),"black_base",b);c.movieOverlay(base.c_str(),b);}
@@ -785,7 +783,7 @@ static void composeMenuImpl(const MenuState& s,const UiRaceView& race,std::vecto
    c.text(s.settingValue(row),"rule_value_text",child(value,control("VSSettingUpDownText","Text")));
   }
   c.button("button",rows,control("VSSetting","ButtonOK",rows),"OK");
-  c.chrome(controlsPage?"Controls":"Settings",controlsPage?(controls().custom?"Classic: Square brakes, Circle looks behind.":"Default: Circle brakes, Square looks behind."):"Left / Right: change the setting.");
+  c.chrome(controlsPage?"Controls":"Settings",controlsPage?"Choose an action, then press its button.":"Left / Right: change the setting.");
   break;
  }
  case UiPage::QuitConfirm:{
@@ -798,6 +796,7 @@ static void composeMenuImpl(const MenuState& s,const UiRaceView& race,std::vecto
  }
  c.notice();c.unlocked();
  if(s.messageOpen&&s.page==UiPage::Drift)c.message(UiMessageDriftHelp);
+ if(s.binding>=0&&s.page==UiPage::Controls){char text[96];std::snprintf(text,sizeof text,"%s\n%s",ControlActionNames[s.binding],UiMessageBindControl);c.message(text);}
 }
 void composeMenu(const MenuState& s,const UiRaceView& race,std::vector<UiQuad>& q){composeMenuImpl(s,race,q,nullptr);}
 void composeMenu(const MenuState& s,const UiRaceView& race,std::vector<UiQuad>& q,const UiTransitionView& t){composeMenuImpl(s,race,q,&t);}

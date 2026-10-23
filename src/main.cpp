@@ -117,6 +117,8 @@ namespace K = Kinoko;
 static constexpr const char* DATA = MKW_DATA_ROOT;
 namespace mkw {extern std::atomic<unsigned> fileOpens;extern std::atomic<unsigned long long> fileOpenTicks;}
 static bool exists(const char* p) { FILE* f=fopen(p,"rb"); if(!f)return false; fclose(f);return true; }
+// mkw::ControlButton order (Cross, Circle, Square, Triangle, L, R, SELECT) as the keys hidScanInput reports.
+static constexpr u32 ControlButtonKeys[]={KEY_A,KEY_B,KEY_Y,KEY_X,KEY_L,KEY_R,KEY_SELECT};
 #ifdef __vita__
 // The Vita's race detail. Defaults leave out only what is too small to see:
 // objects under about 4 px and far item boxes' sparkle. ux0:data/mkw/quality.txt
@@ -144,7 +146,9 @@ static void applyVitaQuality(){
             else if(n=="animationStep")q.animationStep=unsigned(value);
             else if(n=="framerate")q.framerate=value<45?30u:60u;
             else if(n=="map")q.wiiMap=value!=0;
-            else if(n=="controls_custom")mkw::controls().custom=value!=0;
+            else if(n=="controls_custom"&&value!=0)mkw::controls().bindings=mkw::ClassicControls; // 1.5.0 betas
+            else if(n.starts_with("control_")){const unsigned a=unsigned(atoi(name+8)),b=unsigned(value);
+                if(a<mkw::ControlActionCount&&b<mkw::ControlButtonCount)mkw::controls().bind(mkw::ControlAction(a),mkw::ControlButton(b));}
         }
         fclose(f);
     }
@@ -173,7 +177,7 @@ static bool writeVitaQuality(const mkw::RenderQuality& q,float resolution){
     fprintf(f,"resolution=%.2f\nminScreenRatio=%g\nobjectLowDistance=%g\nshadowVolumes=%d\nbloomBlurRounds=%u\nboxSparkleRatio=%g\nparticleBudget=%d\nkartEffectScreens=%u\nanimationStep=%u\nframerate=%u\nmap=%d\n",
         double(resolution),double(q.minScreenRatio),double(q.objectLowDistance),int(q.shadowVolumes),q.bloomBlurRounds,double(q.boxSparkleRatio),
         q.particleBudget==~0u?-1:int(q.particleBudget),q.kartEffectScreens,q.animationStep,q.framerate,int(q.wiiMap));
-    fprintf(f,"controls_custom=%d\n",int(mkw::controls().custom));
+    for(unsigned a=0;a<mkw::ControlActionCount;++a)fprintf(f,"control_%u=%u\n",a,unsigned(mkw::controls().active()[a]));
     return fclose(f)==0;
 }
 // The LiveArea's Settings button relaunches the game with "-settings"
@@ -708,12 +712,12 @@ int main() {
         bool modal=false;mkw::UiPage underlayPage=mkw::UiPage::Strap;unsigned underlayCursor=0;
         // Page state outside the selection that changes what a page draws (settings values,
         // a message window, ghost and cup pages): new text must load when it changes.
-        bool messageOpen=false,framerate60=false,wiiMap=false,customControls=false,unlockAll=false;unsigned cupPage=0,ghostPage=0,ghostCount=0,recordsCup=0;
+        bool messageOpen=false,framerate60=false,wiiMap=false,unlockAll=false,settingsUnlockAll=false;int binding=-1;mkw::ControlBindings controls{};unsigned cupPage=0,ghostPage=0,ghostCount=0,recordsCup=0;
         bool operator==(const ResidencyKey&)const=default;
     };
     auto residencyKey=[](const mkw::MenuState& state,const mkw::MenuState* underlay){
         ResidencyKey key;key.page=state.page;key.cursor=state.cursor;key.selection=state.selection;key.unavailable=state.unavailable;key.locked=state.locked;key.unlockNotice=state.unlockNotice;
-        key.messageOpen=state.messageOpen;key.framerate60=state.settings.framerate60;key.wiiMap=state.settings.wiiMap;key.customControls=mkw::controls().custom;
+        key.messageOpen=state.messageOpen;key.framerate60=state.settings.framerate60;key.wiiMap=state.settings.wiiMap;key.settingsUnlockAll=state.settings.unlockAll;key.binding=state.binding;key.controls=mkw::controls().active();
         key.unlockAll=mkw::progress().unlockAll;key.cupPage=state.cupPage;key.ghostPage=state.ghostPage;key.ghostCount=state.ghostCount;key.recordsCup=state.recordsCup;
         if(underlay){key.modal=true;key.underlayPage=underlay->page;key.underlayCursor=underlay->cursor;}
         return key;
@@ -832,6 +836,12 @@ int main() {
                }
                menu.showGhost(0);}}
              else ghostCourse=-1;}
+            // A Controls row waiting for a button: the next button pressed takes the action.
+            if(menu.page==mkw::UiPage::Controls&&menu.binding>=0){
+                for(unsigned b=0;b<mkw::ControlButtonCount;++b)if(down&ControlButtonKeys[b]){
+                    mkw::controls().bind(mkw::ControlAction(menu.binding),mkw::ControlButton(b));menu.binding=-1;menu.settingsChanged=true;break;}
+                input={};
+            }
             const auto beforeInput=menu;
             menu.entropy=unsigned(svcGetSystemTick());
             auto action=transition.input(menu,input);
@@ -849,10 +859,10 @@ int main() {
             if(menu.eraseRequest){menu.eraseRequest=false;mkw::progress().erase(std::min(menu.selection.license,mkw::Progress::Licenses-1));if(!mkw::progress().save())report("save failed");}
 #ifdef __vita__
             // Options: show the current settings; apply and save what the pages changed.
-            if(menu.page==mkw::UiPage::Options&&!menu.settingsChanged){const auto& q=mkw::renderQuality();menu.settings={q.framerate==60,q.wiiMap};}
+            if(menu.page==mkw::UiPage::Options&&!menu.settingsChanged){const auto& q=mkw::renderQuality();menu.settings={q.framerate==60,q.wiiMap,mkw::progress().unlockAll};}
             if(menu.settingsChanged){
                 menu.settingsChanged=false;auto& q=mkw::renderQuality();
-                q.framerate=menu.settings.framerate60?60:30;q.wiiMap=menu.settings.wiiMap;
+                q.framerate=menu.settings.framerate60?60:30;q.wiiMap=menu.settings.wiiMap;mkw::progress().unlockAll=menu.settings.unlockAll;
                 if(!writeVitaQuality(q,readVitaResolution())||!mkw::progress().save())report("settings save failed");
             }
 #endif
@@ -1809,11 +1819,10 @@ int main() {
         lookBehind=false;
         if(fullRace&&!autoplay&&menu.page==mkw::UiPage::Race&&!intro.active()){
             const auto& bound=mkw::controls().active();
-            constexpr u32 physical[]={KEY_A,KEY_B,KEY_Y,KEY_X,KEY_L,KEY_R,KEY_SELECT};
             constexpr u32 logical[]={KEY_A,KEY_B,0,KEY_R,KEY_L,KEY_X,KEY_SELECT};
             auto remap=[&](u32 k){u32 out=k&~u32(KEY_A|KEY_B|KEY_X|KEY_Y|KEY_L|KEY_R|KEY_SELECT);
-                for(unsigned a=0;a<mkw::ControlActionCount;++a)if(k&physical[unsigned(bound[a])])out|=logical[a];return out;};
-            lookBehind=held&physical[unsigned(bound[unsigned(mkw::ControlAction::LookBehind)])];
+                for(unsigned a=0;a<mkw::ControlActionCount;++a)if(k&ControlButtonKeys[unsigned(bound[a])])out|=logical[a];return out;};
+            lookBehind=held&ControlButtonKeys[unsigned(bound[unsigned(mkw::ControlAction::LookBehind)])];
             held=remap(held);down=remap(down);
         }
         const bool endMenu=menu.page==mkw::UiPage::Results&&results.phase()==mkw::RaceFlowPhase::Menu;
@@ -2814,6 +2823,24 @@ int main() {
                 }}
             renderer.setScreenDepth(renderer.stereoLayer(mkw::stereo::HudLayer));
             if(fullRace)flowUi.drawResults(renderer,results);
+            if(fullRace&&intro.active()&&menu.page==mkw::UiPage::Race){
+                // The preview banner fades in, then out over the preview's last ticks.
+                const unsigned t=intro.ticks(),total=intro.frames();
+                const float alpha=std::min({1.f,float(t)/20.f,total>t?float(total-t)/20.f:0.f});
+                static constexpr const char* Classes[]={"50cc","100cc","150cc"};
+                const char* cc=mirrorMode?"Mirror":cc200Mode?"200cc":Classes[std::min(engineClass,2u)];
+                char mode[96];const char* course=Courses[std::min(courseChoice,mkw::RaceCourseCount-1)].name;
+                unsigned icon=courseChoice/4<8&&!mkw::RetroRewindEdition?courseChoice/4:8; // the cup's icon, else the flag
+                if(battleMode){
+                    snprintf(mode,sizeof mode,"%s",coinRunnersMode?"Coin Runners":"Balloon Battle");icon=coinRunnersMode?10:9;
+                    course=mkw::UiBattleStageNames[std::min<unsigned>(courseChoice-mkw::RaceCourseCount,9)];
+                }else if(timeTrial)snprintf(mode,sizeof mode,"Time Trials");
+                else if(menu.selection.mode==mkw::UiMode::GrandPrix){
+                    const char* cup=Courses[std::min(courseChoice,mkw::RaceCourseCount-1)].cup;
+                    snprintf(mode,sizeof mode,"%s %s%s - %u of %u",cc,cup,std::strstr(cup,"Cup")?"":" Cup",vsSet.race,vsRaceCount); // retail cups are "Mushroom"..., Retro Rewind's "Retro Cup 1"...
+                }else{snprintf(mode,sizeof mode,"%s %sVS Race - %u of %u",cc,teamVs?"Team ":"",vsSet.race,vsRaceCount);icon=8;}
+                flowUi.drawIntro(renderer,mode,icon,course,alpha);
+            }
             if(fullRace&&(battleMode||teamVs)&&results.boardVisible()){
                 // The set's team totals over the board; the winners pulse on the last one.
                 unsigned red=0,blue=0;for(unsigned i=0;i<raceGrid.count();++i)(mkw::BalloonBattle::team(i)?blue:red)+=battleMode?battleSet.points[i]:vsSet.points[i];

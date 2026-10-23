@@ -90,9 +90,13 @@ public:
  bool nameRequest=false;
  // A message window over the page (the Drift page's Help): A or B closes it.
  bool messageOpen=false;
+ // Controls: the action row waiting for its new button (-1 none); main binds it.
+ int binding=-1;
  // Options (from the license page): settings main keeps in quality.txt and save.bin.
- // Controls live in mkw::controls(); settingsChanged asks main to apply and save them.
- struct Settings {bool framerate60=true,wiiMap=true;} settings{};
+ // Controls live in mkw::controls(); settingsChanged asks main to save them.
+ // Pages edit these copies only: main warms neighbouring pages by running inputs on
+ // copies of the state, so a step must never write globals (progress, controls).
+ struct Settings {bool framerate60=true,wiiMap=true,unlockAll=false;} settings{};
  bool settingsChanged=false;
  // Clock noise from main for Random courses: page ages alone repeat after every race.
  unsigned entropy=0;
@@ -100,7 +104,8 @@ public:
  bool eraseRequest=false;
  // Records: the cup whose Time Trial bests are shown.
  unsigned recordsCup=0;
- // Controls / GameSettings rows: a label and its value (left/right steps it); OK last.
+ // Controls / GameSettings rows: a label and its value; OK last. Settings step with
+ // left/right or A, a Controls row waits for a button (binding).
  const char* settingLabel(unsigned row)const;const char* settingValue(unsigned row)const;
  void stepSetting(unsigned row,int direction);
  // An "Unlocked!" notice over the page (a Progress unlockable, -1 none): A or B closes it.
