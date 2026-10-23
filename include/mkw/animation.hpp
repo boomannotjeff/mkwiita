@@ -80,6 +80,7 @@ private:
     void write(Model& model,const uint32_t* shown,const int32_t* textures,const float* uv,const float* palette);
     // Shared by apply() and pose(): interpolated (and blended) palette.
     void evaluate(const Clip& c,unsigned a,unsigned b,float t,unsigned tick,float blend);
+    void stripHandlePivot();
     std::vector<std::vector<RigidPart>> rigidParts_;
     std::array<int,64> baseTextures_{};
     uint8_t* data_=nullptr;bool dataLinear_=false;const SourceVertex* source_=nullptr;const Range* ranges_=nullptr;

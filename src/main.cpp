@@ -702,10 +702,11 @@ int main() {
     struct ResidencyKey {
         mkw::UiPage page=mkw::UiPage::Strap;unsigned cursor=0;mkw::UiSelection selection{};bool unavailable=false,locked=false;int unlockNotice=-1;
         bool modal=false;mkw::UiPage underlayPage=mkw::UiPage::Strap;unsigned underlayCursor=0;
+        unsigned cupPage=0; // a new cup page draws new text
         bool operator==(const ResidencyKey&)const=default;
     };
     auto residencyKey=[](const mkw::MenuState& state,const mkw::MenuState* underlay){
-        ResidencyKey key;key.page=state.page;key.cursor=state.cursor;key.selection=state.selection;key.unavailable=state.unavailable;key.locked=state.locked;key.unlockNotice=state.unlockNotice;
+        ResidencyKey key;key.page=state.page;key.cursor=state.cursor;key.selection=state.selection;key.unavailable=state.unavailable;key.locked=state.locked;key.unlockNotice=state.unlockNotice;key.cupPage=state.cupPage;
         if(underlay){key.modal=true;key.underlayPage=underlay->page;key.underlayCursor=underlay->cursor;}
         return key;
     };
@@ -817,6 +818,7 @@ int main() {
                menu.ghostMilliseconds=menu.ghostAvailable?h.milliseconds:0;}}
              else ghostCourse=-1;}
             const auto beforeInput=menu;
+            menu.entropy=unsigned(svcGetSystemTick());
             auto action=transition.input(menu,input);
             if(menu.nameRequest){
                 menu.nameRequest=false;
@@ -2196,7 +2198,7 @@ int main() {
                             vsSet.next=results.chosen()==0&&!results.finalRace();battleSet.next=battleMode&&vsSet.next;
                             if(results.chosen()==0&&results.finalRace()&&!teamVs&&!battleMode&&!timeTrial)queueCeremony(); // GP, and solo VS (ours)
                             else if(results.chosen()==0&&results.finalRace()&&(teamVs||battleMode))queueTeamCeremony();
-                            if(menu.page==mkw::UiPage::Results){menu.cursor=unsigned(std::max(0,results.chosen()));nextRaceQueued=menu.input({false,false,false,false,true})==mkw::UiAction::StartRace;}
+                            if(menu.page==mkw::UiPage::Results){menu.cursor=unsigned(std::max(0,results.chosen()));menu.entropy=unsigned(svcGetSystemTick());nextRaceQueued=menu.input({false,false,false,false,true})==mkw::UiAction::StartRace;}
                         }
                         flowUi.step(results);
                     }
