@@ -1,54 +1,33 @@
 """The pause menu's controller picture for the Vita (retail shows its own
-controller, Race/game_image controller_info_*.brlyt): a photo of a PS Vita,
-cut out of its background, with a leader line from each of the main controls
-to the label bar where the game writes that control's action at runtime.
-
-Photo: assets/vita-controls/vita_front.jpg, "Sony PlayStation Vita Slim
-PCH-2000 (black) - front view" by ITEagle Europe (Sebastiaan Broekhoven),
-CC BY-SA 4.0, Wikimedia Commons; see licenses/vita-photo.txt. Cut out and
-outlined here.
+controller, Race/game_image controller_info_*.brlyt): the project site's PS
+Vita picture (site/pictures/vita.webp, already cut out) with a leader line
+from each of the main controls to the label bar where the game writes that
+control's action at runtime.
 
 Layout units are the menu canvas (608x456, origin at its centre, y down).
 draw() returns the image, its rectangle and the label bars, one per control
 named as mkw::ControlButtonNames, or "Stick" for steering.
 """
 from pathlib import Path
-import numpy as np
-from PIL import Image, ImageDraw, ImageFilter
+from PIL import Image, ImageDraw
 
 ROOT = Path(__file__).resolve().parents[1]
-PHOTO = ROOT / 'assets/vita-controls/vita_front.jpg'
+PICTURE = ROOT / 'site/pictures/vita.webp'
 RECT = (-296, -176, 296, -20)  # the picture's place over the pause buttons
 BAR_W, BAR_H = 120, 16
 SCALE = 2  # pixels per canvas unit
 LINE, WHITE = (70, 120, 255, 255), (255, 255, 255, 255)
-# The photo's console, as fractions of its cut-out (left, top, right, bottom = 0..1).
+# The picture's controls, as fractions of its bounds (left, top, right, bottom = 0..1).
 CONTROLS = {
-    'Cross': (0.910, 0.430), 'Circle': (0.948, 0.300), 'Square': (0.857, 0.300),
-    'L': (0.110, 0.020), 'R': (0.890, 0.020), 'Stick': (0.100, 0.540),
+    'Cross': (0.903, 0.428), 'Circle': (0.948, 0.338), 'Square': (0.859, 0.338),
+    'L': (0.110, 0.020), 'R': (0.890, 0.020), 'Stick': (0.117, 0.590),
 }
 
 
 def cutout():
-    im = Image.open(PHOTO).convert('RGB')
-    a = np.asarray(im, dtype=np.int32)
-    # The console is near black; the cardboard is light brown.
-    dark = a.max(axis=2) < 70
-    mask = Image.fromarray(np.uint8(dark) * 255).filter(ImageFilter.MedianFilter(9))
-    # Fill the buttons and screen reflections inside the outline: row-wise span fill.
-    m = np.asarray(mask) > 0
-    ys, xs = np.nonzero(m)
-    filled = np.zeros_like(m)
-    for y in range(ys.min(), ys.max() + 1):
-        row = np.nonzero(m[y])[0]
-        if len(row) > 50:
-            filled[y, row.min():row.max() + 1] = True
-    box = (xs.min(), ys.min(), xs.max() + 1, ys.max() + 1)
-    alpha = Image.fromarray(np.uint8(filled) * 255).filter(ImageFilter.GaussianBlur(2))
-    # Lift the black body so it reads on the dark pause menu; outlined in white by draw().
-    lifted = Image.eval(im, lambda v: min(255, int(v * 1.6 + 25))).convert('RGBA')
-    lifted.putalpha(alpha)
-    return lifted.crop(box), alpha.crop(box)
+    im = Image.open(PICTURE).convert('RGBA')
+    im = im.crop(im.getchannel('A').getbbox())
+    return im, im.getchannel('A')
 
 
 def draw():
