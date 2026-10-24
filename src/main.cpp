@@ -819,6 +819,9 @@ int main() {
              else ghostCourse=-1;}
             const auto beforeInput=menu;
             menu.entropy=unsigned(svcGetSystemTick());
+            // Retail pages ignore input during In/Out animations: a press the
+            // transition drops plays no sound (MenuSound::input contract).
+            const bool inputOpen=!transition.active();
             auto action=transition.input(menu,input);
             if(menu.nameRequest){
                 menu.nameRequest=false;
@@ -835,7 +838,7 @@ int main() {
             if(menu.unlockNotice<0&&!pendingUnlocks.empty()&&revealed&&!transition.active()&&!menu.simulates()&&menu.page!=mkw::UiPage::Pause&&menu.page!=mkw::UiPage::QuitConfirm){
                 menu.unlockNotice=int(pendingUnlocks.front());pendingUnlocks.erase(pendingUnlocks.begin());
             }
-            menuSound.input(beforeInput,menu,input,action);
+            if(inputOpen)menuSound.input(beforeInput,menu,input,action);
             if(action!=mkw::UiAction::None){if(action==mkw::UiAction::StartRace||action==mkw::UiAction::RestartRace)menuSound.leave();return leave(action);}
             auto now=svcGetSystemTick();pending+=std::min(double(now-last)/SYSCLOCK_ARM11,.1)*60;last=now;
             unsigned ticks=unsigned(pending);pending-=ticks;
@@ -2657,7 +2660,17 @@ int main() {
             renderer.setCourseLighting(true);
             for(auto& model:sky)renderer.draw(*model,transform,true);
             courseObjects.drawSky(renderer,physicsSteps,renderer.cameraPosition());
-            for(auto& model:track)renderer.draw(*model,transform);
+            // NW4R draws every opaque shape, then the translucent list. The course model
+            // (group 6, CourseModel ctor 0x8078E404) is opa 0x25 and its XLU materials
+            // (Submesh flag 2) xlu 0x33: after the objects, karts and items (opa 0x4E-0x5A),
+            // ahead of their own xlu (0x34), the ghost (0x4B) and the effects (0x51/0x57).
+            struct TrackPass{const mkw::Model* model;bool xlu;};
+            const auto trackPass=[](void* context,std::size_t i){
+                const auto& pass=*static_cast<const TrackPass*>(context);
+                return bool(pass.model->submeshes[i].flags&2)==pass.xlu;
+            };
+            const C3D_Mtx courseTransform=transform;
+            for(auto& model:track)renderer.draw(*model,courseTransform,false,nullptr,TrackPass{model.get(),false},trackPass);
             profiler->mark(Profile::Course);
             courseObjects.draw(renderer,physicsSteps,renderer.cameraPosition());profiler->mark(Profile::Scenery);
             renderer.setCourseLighting(false);
@@ -2739,6 +2752,8 @@ int main() {
             renderer.additiveColor=0;
             profiler->mark(Profile::Player);
             renderer.setCourseLighting(true);
+            // The course's translucent list (xlu 0x33) opens the translucent pass.
+            for(auto& model:track)renderer.draw(*model,courseTransform,false,nullptr,TrackPass{model.get(),true},trackPass);
             courseObjects.drawWater(renderer);
             renderer.setCourseLighting(false);
             renderer.drawSparks(driftEffects,sparkTexture);
@@ -2747,6 +2762,11 @@ int main() {
             renderer.applyBloom();
             if(fullRace)renderer.drawScreenFade(lightningFlash.opacity(),lightningFlash.white);
             profiler->mark(Profile::Effects);
+            // The out-of-bounds wipe is page 0x3A, the race sections' first active page
+            // (Section_addActivePages 0x80630094); Section_draw (0x80622764) draws the
+            // pages in that order, so the minimap, HUD and result boards stay over it.
+            renderer.setScreenDepth(0);
+            if(fullRace)flowUi.drawWipe(renderer,cameraDirector->wipeProgress());
             // Stereo layers (Mario Kart 7's): the HUD and result boards 4 px
             // behind the screen; the full-screen wipe and the pause menu on the
             // screen plane.
@@ -2790,7 +2810,6 @@ int main() {
                 raceHud.drawBattleTotals(renderer,red,blue,results.finalRace()&&red!=blue?(red>blue?0u:1u):2u,physicsSteps);
             }
             renderer.setScreenDepth(0);
-            if(fullRace)flowUi.drawWipe(renderer,cameraDirector->wipeProgress());
             profiler->mark(Profile::Hud);
             if(fullRace&&menu.page!=mkw::UiPage::Race)menuRenderer.draw(renderer,raceQuads,false);
             // Leaving after the end-of-race menu: the scene fader covers everything.

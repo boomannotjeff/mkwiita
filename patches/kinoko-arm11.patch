@@ -732,6 +732,22 @@ index dbb08e8..5a736e2 100644
          const EGG::Vector3f &firstPos = m_followers[i]->pos();
  
          for (u32 j = i + 1; j < m_followers.size(); ++j) {
+diff --git a/source/game/field/obj/ObjectBreakable.hh b/source/game/field/obj/ObjectBreakable.hh
+index 456eb59..f6cd62a 100644
+--- a/source/game/field/obj/ObjectBreakable.hh
++++ b/source/game/field/obj/ObjectBreakable.hh
+@@ -28,6 +28,11 @@ public:
+         m_state = 1;
+     }
+ 
++    /// Presentation only: retail +0xB0. 0 is hidden (retail hides the model), 1 and 2 show it.
++    [[nodiscard]] u32 state() const {
++        return m_state;
++    }
++
+ protected:
+     u32 m_state;
+ };
 diff --git a/source/game/field/obj/ObjectBulldozer.cc b/source/game/field/obj/ObjectBulldozer.cc
 index f592e7f..4d8ae43 100644
 --- a/source/game/field/obj/ObjectBulldozer.cc
@@ -2279,6 +2295,22 @@ index 4be2781..5a38aeb 100644
  private:
      void enterStateStub();
      void calcStateStub();
+diff --git a/source/game/field/obj/ObjectObakeManager.hh b/source/game/field/obj/ObjectObakeManager.hh
+index cf6ad25..4806385 100644
+--- a/source/game/field/obj/ObjectObakeManager.hh
++++ b/source/game/field/obj/ObjectObakeManager.hh
+@@ -89,6 +89,11 @@ public:
+ 
+     void addBlock(const System::MapdataGeoObj &params);
+ 
++    /// Presentation only: every block, in placement order (retail +0xDDD8).
++    [[nodiscard]] const fixed_vector<ObjectObakeBlock *> &blocks() const {
++        return m_blocks;
++    }
++
+ private:
+     static constexpr size_t CACHE_SIZE_X = 122;
+     static constexpr size_t CACHE_SIZE_Z = 116;
 diff --git a/source/game/field/obj/ObjectPakkunF.hh b/source/game/field/obj/ObjectPakkunF.hh
 index 5a1ae1e..e561bbb 100644
 --- a/source/game/field/obj/ObjectPakkunF.hh

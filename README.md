@@ -90,9 +90,9 @@ For the Retro Rewind edition, see [its quick start](#retro-rewind-edition).
 5. Launch **Mario Kart Wii** from the LiveArea and pick an empty license slot to make your license: the
    Vita's keyboard asks for its name.
 
-**Updating from 1.4.0:** just install the 1.4.1 VPK. It uses the same game files, so there is nothing to rebuild.
+**Updating from 1.4.x:** just install the 1.4.2 VPK. It uses the same game files, so there is nothing to rebuild.
 
-**Updating from 1.3.0 or older:** build the game files again from the 1.4.1 source (the VPK and the game files must
+**Updating from 1.3.0 or older:** build the game files again from the 1.4.2 source (the VPK and the game files must
 come from the same release). On the Vita, delete the old `.pak` files and the `models` folder in `ux0:data/mkw/`
 first, then copy the new files. Your licenses, times and ghosts stay.
 
@@ -105,8 +105,6 @@ game data. The VPK itself is only the program; it holds no game data.
 Retro Rewind 6 Wii mod. It plays its tracks, music, character skins and
 menus on this port's engine. The build reads them from your Retro Rewind folder; nothing from
 Retro Rewind is in this repository or in the VPK.
-
-![Retro Rewind on the Vita: a Retro Rewind track with a character skin](site/pictures/rr-skins.png)
 
 | | |
 |---|---|
@@ -143,9 +141,6 @@ Retro Rewind is in this repository or in the VPK.
 
 Settings, logs and troubleshooting work as below, with `ux0:data/mkwrr` in place of `ux0:data/mkw`.
 
-| | |
-|---|---|
-| ![A custom track with name tags](site/pictures/rr-custom-track.png) | ![A retro track in first place](site/pictures/rr-retro-track.png) |
 
 ## Controls
 
