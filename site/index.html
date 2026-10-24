@@ -456,7 +456,7 @@
   <main>
     <div class="hero">
       <div class="wrap">
-        <span class="tag">Playable · 1.4.1</span>
+        <span class="tag">Playable · 1.4.2</span>
         <h1>Mario Kart Wii,<br>native on <em>PS Vita</em>.</h1>
         <p class="lede">Not an emulator: a native port of MKW-3DS, the 1:1 3DS recreation of Mario Kart Wii.
           Two editions: Mario Kart Wii, and <a href="#retro-rewind">MKW Retro Rewind</a> with 310 tracks.</p>
@@ -592,8 +592,8 @@
               class="ok">Working</span></div>
           <div class="row"><span>200cc, Mirror, character skins, speedometer, everything unlocked</span><span
               class="ok">Working</span></div>
-          <div class="row"><span>Retro Rewind's own rules, battle arenas and track variants</span><span
-              class="no">Not yet</span></div>
+          <div class="row"><span>Retro Rewind's own rules, battle arenas and track variants</span><span class="no">Not
+              yet</span></div>
           <div class="row"><span>Online</span><span class="no">No</span></div>
         </div>
       </div>
@@ -613,7 +613,8 @@
               class="ok">Working</span></div>
           <div class="row"><span>Settings from the LiveArea: 60 FPS Performance, Default or 2x-resolution Quality
               preset</span><span class="ok">Working</span></div>
-          <div class="row"><span>All 24 drivers, items, CPU racers, music and sound</span><span class="ok">Working</span>
+          <div class="row"><span>All 24 drivers, items, CPU racers, music and sound</span><span
+              class="ok">Working</span>
           </div>
           <div class="row"><span>Racing or watching the staff ghosts</span><span class="wip">In progress</span></div>
           <div class="row"><span>Online</span><span class="no">Not yet</span></div>
@@ -628,10 +629,12 @@
         <ol class="steps">
           <li>Download <code>mkw.vpk</code> from the
             <a href="https://github.com/boomannotjeff/mkwiita/releases/latest">latest release</a> and install it with
-            VitaShell.</li>
+            VitaShell.
+          </li>
           <li>Run <code>Build Game Files.bat</code> from the same release's source code and drag in your disc image
             (30–60 minutes the first time). On macOS or Linux, see
-            <a href="https://github.com/boomannotjeff/mkwiita/blob/main/BUILDING-MAC-LINUX.md">this guide</a>.</li>
+            <a href="https://github.com/boomannotjeff/mkwiita/blob/main/BUILDING-MAC-LINUX.md">this guide</a>.
+          </li>
           <li>Copy the contents of <code>build\vita\data\mkw\</code> to <code>ux0:data/mkw/</code>.</li>
           <li>Make sure <code>ur0:data/libshacccg.suprx</code> exists (run ShaRKF00D once), then launch.</li>
         </ol>
@@ -640,15 +643,17 @@
           <li>Download <code>mkw-retro-rewind.vpk</code> and unzip the release's source into its <strong>own
               folder</strong>.</li>
           <li>Run <code>Build Retro Rewind Game Files.bat</code>, drag in your disc image, then your
-            <code>RetroRewind6</code> folder (a few hours and about 45 GB the first time).</li>
+            <code>RetroRewind6</code> folder (a few hours and about 45 GB the first time).
+          </li>
           <li>Copy the contents of <code>build\vita\data\mkwrr\</code> to <code>ux0:data/mkwrr/</code>.</li>
         </ol>
-        <p class="note">Updating from 1.4.0? Just install the new VPK: 1.4.1 uses the same game files.
+        <p class="note">Updating from 1.4.x? Just install the new VPK: 1.4.2 uses the same game files.
           From an older release, build the game files again from the new release (the VPK and the game files must come
           from the same one) and delete the old <code>.pak</code> files on the Vita before copying the new ones.</p>
         <p class="note">Please don't share the built game files: they contain Nintendo's data. More in the
           <a href="https://github.com/boomannotjeff/mkwiita#readme">README</a> and
-          <a href="https://github.com/boomannotjeff/mkwiita/blob/main/BUILDING.md">BUILDING.md</a>.</p>
+          <a href="https://github.com/boomannotjeff/mkwiita/blob/main/BUILDING.md">BUILDING.md</a>.
+        </p>
       </div>
     </section>
   </main>

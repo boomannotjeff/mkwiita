@@ -1,10 +1,17 @@
 #include "mkw/course_object_kinds.hpp"
 #include "mkw/factory_belts.hpp"
 #include "mkw/render_quality.hpp"
+// Kinoko's ObjectBreakable::enableCollision hides ObjectBase's const one, a
+// warning reported at ObjectBase.hh: silenced over the Kinoko headers.
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Woverloaded-virtual"
+#include <game/kart/KartObjectManager.hh>
+#include <game/system/RaceConfig.hh>
 #include <game/field/ObjectDirector.hh>
 #include <game/field/obj/ObjectBase.hh>
 #include <game/field/obj/ObjectBasabasa.hh>
 #include <game/field/obj/ObjectBird.hh>
+#include <game/field/obj/ObjectBreakable.hh>
 #include <game/field/obj/ObjectCarTGE.hh>
 #include <game/field/obj/ObjectChoropu.hh>
 #include <game/field/obj/ObjectCow.hh>
@@ -14,6 +21,7 @@
 #include <game/field/obj/ObjectFirebar.hh>
 #include <game/field/obj/ObjectFlamePole.hh>
 #include <game/field/obj/ObjectFlamePoleFoot.hh>
+#include <game/field/obj/ObjectFlamePoleV.hh>
 #include <game/field/obj/ObjectHanachan.hh>
 #include <game/field/obj/ObjectFireSnake.hh>
 #include <game/field/obj/ObjectHeyho.hh>
@@ -25,6 +33,7 @@
 #include <game/field/obj/ObjectTwistedWay.hh>
 #include <game/field/obj/ObjectVeniceHasi.hh>
 #include <game/field/obj/ObjectKuribo.hh>
+#include <game/field/obj/ObjectObakeBlock.hh>
 #include <game/field/obj/ObjectPakkunF.hh>
 #include <game/field/obj/ObjectPenguin.hh>
 #include <game/field/obj/ObjectPress.hh>
@@ -32,6 +41,7 @@
 #include <game/field/obj/ObjectVolcanoBallLauncher.hh>
 #include <game/field/obj/ObjectWanwan.hh>
 #include <game/system/RaceManager.hh>
+#pragma GCC diagnostic pop
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -367,11 +377,13 @@ void drawFlock(ObjectDraw& d,Visual& v){
         d.submit(v.main.model,facingMatrix(p,v.velocities[i],vec(part->scale())),a);
     }
 }
-// Grumble Volcano lava balls: hidden while dormant (Kinoko state 0).
+// Grumble Volcano lava balls (retail RMCP 806e2f38/806e3324): the rock shows
+// only while it falls (Kinoko state 1). Dormant (0) it is hidden, and burning
+// (2) retail hides it every step.
 void drawVolcanoBalls(ObjectDraw& d,Visual& v){
     const auto& launcher=*static_cast<const K::Field::ObjectVolcanoBallLauncher*>(v.object);
     for(const auto* ball:launcher.balls()){
-        if(!ball||ball->stateId()==0)continue;
+        if(!ball||ball->stateId()!=1)continue;
         const C3D_Mtx m=liveMatrix(*ball);
         d.submit(v.main.model,m,{});
         if(v.shadow.model)d.shadow(v.shadow.model,m);
@@ -688,12 +700,14 @@ void drawItemboxLine(ObjectDraw& d,Visual& v){
         }
     }
 }
-// Toad's Factory falling crates (Kinoko ObjectWoodboxW): the spawner has no
-// model of its own; each of its ObjectWoodboxWSub boxes (the parts before it)
-// is drawn where Kinoko holds it, so the crate and its collision agree.
+// Toad's Factory falling crates (Kinoko ObjectWoodboxW, retail RMCP 8077e1e4):
+// the spawner has no model of its own (0x8077ECD8). Each crate (WoodboxWSub)
+// shows from its spawn (Breakable::enableCollision 0x8076ED70) until its route
+// ends (0x8077E49C), where Kinoko holds it, so the crate and its collision agree.
 void drawWoodboxes(ObjectDraw& d,Visual& v){
-    for(size_t i=0;i+1<v.parts.size();++i){
-        const C3D_Mtx m=liveMatrix(*v.parts[i]);
+    for(const auto* part:v.parts){
+        if(part==v.object||static_cast<const K::Field::ObjectBreakable*>(part)->state()-1u>1u)continue;
+        const C3D_Mtx m=liveMatrix(*part);
         const bool far=v.low.model&&length(position(m)-d.camera)>renderQuality().objectLowDistance;
         d.submit(far?v.low.model:v.main.model,m,{});
         if(v.shadow.model)d.shadow(v.shadow.model,m);
@@ -706,6 +720,74 @@ void drawPillar(ObjectDraw& d,Visual& v){
     d.submit(v.main.model,m,{});
     if(v.extra[0].model)d.submit(v.extra[0].model,v.placement,{});
     if(v.shadow.model)d.shadow(v.shadow.model,m);
+}
+// Lava columns (Kinoko ObjectFlamePoleV, retail RMCP init 806c3e90, enter
+// erupting 806c4178, enter dormant 806c4478): hidden from init, through the
+// start delay and while dormant; shown from each eruption to the end of its
+// lowering (states 1-3) at Kinoko's position and scale. Their CHR0 and SRT0
+// play at rate 1 from init.
+void drawFlamePoleV(ObjectDraw& d,Visual& v){
+    const auto& pole=*static_cast<const K::Field::ObjectFlamePoleV*>(v.object);
+    const unsigned state=pole.stateId();
+    if(state<1||state>3)return;
+    d.submit(v.main.model,liveMatrix(pole),loopAt(v.main,float(d.tick)));
+}
+// Delfino Square's drawbridge (RMCP ObjectTownBridge::calc 80809774): Kinoko
+// tilts the object by the bridge angle (rot z) and retail stops its CHR0 on
+// frame 89|angle|/45 (clamped 0..89) of that same angle; its SRT0 plays at
+// rate 1 from load (0x8080A8DC, 0x8055F1E4).
+void drawTownBridge(ObjectDraw& d,Visual& v){
+    const float angle=std::abs(v.object->rot().z)*180.f/Pi;
+    Anim a=loopAt(v.main,float(d.tick));
+    a.frame=std::clamp(89.f*std::min(angle,45.f)/45.f,0.f,89.f);
+    d.submit(v.main.model,liveMatrix(*v.object),a);
+}
+// SNES Ghost Valley 2 blocks (Kinoko ObjectObakeBlock; retail ObakeManager draw
+// RMCP 8080b578): at rest an unrotated block at its position, while falling at
+// Kinoko's position and tumble rotation, gone once the fall ends (256 steps).
+void drawObakeBlock(ObjectDraw& d,Visual& v){
+    using Fall=K::Field::ObjectObakeBlock::FallState;
+    const auto& block=*static_cast<const K::Field::ObjectObakeBlock*>(v.object);
+    if(block.fallState()==Fall::FinishedFalling)return;
+    K::EGG::Matrix34f t;
+    if(block.fallState()==Fall::Falling)t.makeRT(block.rot(),block.pos());
+    else t.makeT(block.pos());
+    v.drawn=objectMatrix(t,block.scale());v.drawnValid=true;
+    d.submit(v.main.model,v.drawn,{});
+}
+// Cannons: DK Summit's DonkyCannon_wii, DK Mountain's DonkyCannonGC and Maple
+// Treeway's tree_cannon are one retail class (RMCP init 806bfddc, calc
+// 806bfed0). Its one clip, the shot, rests on frame zero (setFrame stops it)
+// and plays once at rate 1 when any kart starts a cannon (CannonStart) while it
+// rests, stopping on frame zero again at its last frame; the generic presenter
+// looped it. CannonStart lasts one step, so a presentation every second step
+// also starts the shot from a kart first seen InCannon, one step late.
+void drawDonkyCannon(ObjectDraw& d,Visual& v){
+    const auto* karts=K::Kart::KartObjectManager::Instance();
+    const auto* config=K::System::RaceConfig::Instance();
+    const unsigned players=karts&&config?config->raceScenario().playerCount:0;
+    // picks: each kart's CannonStart or InCannon when last presented.
+    if(d.tick<v.lastTick){v.picks.clear();v.lastState=-1;}
+    v.lastTick=d.tick;
+    if(v.picks.size()!=players)v.picks.assign(players,0);
+    int start=-1;
+    for(unsigned i=0;i<players;++i){
+        const auto& status=karts->object(i)->status();
+        const bool firing=status.onBit(K::Kart::eStatus::CannonStart);
+        const bool in=firing||status.onBit(K::Kart::eStatus::InCannon);
+        if(in&&!v.picks[i])start=std::max(start,int(firing||!d.tick?d.tick:d.tick-1));
+        v.picks[i]=in;
+    }
+    // lastState: 1 while the shot plays from stateTick, 0 back at rest, -1 never
+    // fired. A start on the step the shot reaches its last frame is ignored.
+    const float last=std::max(clipFrames(v.main,v.main.clip)-1.f,0.f);
+    if(v.lastState==1&&float(d.tick-v.stateTick)>=last)v.lastState=0;
+    if(v.lastState!=1&&start>=0&&(v.lastState<0||unsigned(start)>v.stateTick+unsigned(last))){v.lastState=1;v.stateTick=unsigned(start);}
+    const float frame=v.lastState==1?float(d.tick-v.stateTick):0.f;
+    const bool far=v.low.model&&length(position(v.placement)-d.camera)>renderQuality().objectLowDistance;
+    const Tracks& t=far?v.low:v.main;
+    d.submit(t.model,v.placement,animAt(t,frame));
+    if(v.shadow.model)d.shadow(v.shadow.model,v.placement);
 }
 bool hidden(const Visual& v,int course){
     // Effects, sound sources and triggered splashes have no idle model; item
@@ -728,6 +810,7 @@ bool classifyObject(Visual& v,const ObjectAssets& assets,int course){
     const auto id=static_cast<ObjectId>(v.geo->id());
     const bool live=v.object!=nullptr;
     if(classifyMover(v,assets))return true;
+    if(named(v,"DonkyCannon_wii")||named(v,"DonkyCannonGC")||named(v,"tree_cannon")){v.present=drawDonkyCannon;return true;}
     if(id==ObjectId::Kuribo&&live){
         v.present=drawKuribo;v.clips[0]=clip(v.main,"walk_l");
     }else if(id==ObjectId::Wanwan&&live){
@@ -845,9 +928,22 @@ bool classifyObject(Visual& v,const ObjectAssets& assets,int course){
         v.present=drawPress;v.clips[0]=clip(v.main,"Press");
     }else if(!std::strcmp(v.resource,"coin")){
         v.present=drawCoin;v.kinetic=false;
+    }else if((id==ObjectId::FlamePoleV||id==ObjectId::FlamePoleVBig)&&live){
+        // Both load FlamePole_v (retail getResources 0x806C488C); the big one's
+        // flow entry lists FlamePole_v_big first, an archive no course has.
+        v.present=drawFlamePoleV;v.main=assets.tracks(assets.main("FlamePole_v"));v.low=v.shadow={};
+    }else if(id==ObjectId::TownBridge&&live){
+        v.present=drawTownBridge;
+    }else if((id==ObjectId::ObakeBlockSFCc||id==ObjectId::ObakeBlock2SFCc||id==ObjectId::ObakeBlock3SFCc)&&live){
+        v.present=drawObakeBlock;
     }else if(id==ObjectId::W_Woodbox&&live){
-        // Retail draws the wooden crate outside Time Trials (getKclName).
-        v.present=drawWoodboxes;v.main=find(assets,"woodbox","woodbox");v.low={};v.shadow={};
+        // Retail's crate model is getKclName (0x8077ED7C): ironbox in time
+        // trials (ObjectDirector +0x55), else woodbox.
+        const auto* config=K::System::RaceConfig::Instance();
+        const bool tt=config&&config->raceScenario().gameMode==K::System::RaceConfig::Scenario::GameMode::Time_Trial;
+        v.present=drawWoodboxes;v.main=find(assets,"woodbox",tt?"ironbox":"woodbox");
+        if(!v.main.model)v.main=find(assets,"woodbox","woodbox");
+        v.low={};v.shadow={};
     }else if(id==ObjectId::DCPillar&&live){
         v.present=drawPillar;v.extra[0]=find(assets,v.resource,"dc_pillar_base");
     }else if(named(v,"CarB")||named(v,"b_teresa")||named(v,"BGteresaSFC")){

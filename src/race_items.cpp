@@ -530,6 +530,14 @@ void RaceItems::updateHolder(unsigned i){
     if(h.golden&&!--h.golden){h.item=ItemKind::None;h.charges=0;}
     // Respawning (fn_1_288494) clears the inventory, the roulette and the slot lock.
     if(racers_[i].unavailable&&!racers_[i].inCannon){applyLoss(i,{true,true,false});h.slotLock=ItemKind::None;}
+    // ItemHolderPlayer_update (0x80797928): while the racer has finished (+0x38 & 2) its
+    // inventory is cleared every frame (fn_1_2AC640 0x807BC9F4): no item, no count, and the
+    // trailing items despawn (ItemHolderItem_despawn 0x80795F68: no drop, no break). The
+    // Thunder Cloud never enters the retail inventory (ItemHolder_spawnTc), so its slot stays.
+    if(racers_[i].finished){
+        if(h.item!=ItemKind::ThunderCloud){h.item=ItemKind::None;h.charges=0;h.golden=0;}
+        if(h.deployed){heldDropTicks_[i]=0;for(unsigned slot=0;slot<3;++slot)removeHeld(i,slot,false);}
+    }
     auto& drop=inventoryDrops_[i];
     if(drop.ticks&&--drop.ticks&&(drop.ticks==7||drop.ticks==5||drop.ticks==3)&&drop.count){
         const auto velocity=drop.velocity[--drop.count];

@@ -11,7 +11,7 @@
 #include <memory>
 #include <vector>
 
-namespace Kinoko::Field {class RailInterpolator;class ObjectItemboxPress;}
+namespace Kinoko::Field {class RailInterpolator;class ObjectItemboxPress;class ObjectBase;}
 namespace mkw {
 enum class ItemKind : uint8_t {
     GreenShell=0, RedShell=1, Banana=2, FakeBox=3, Mushroom=4,
@@ -75,6 +75,9 @@ struct ItemBoxLine { std::vector<uint16_t> movers; int32_t timer=0,period=0; uin
 // Toad's Factory belt slot (Kinoko ObjectItemboxPress): a box from the route
 // point marked 2 to the belt end; collected boxes stay gone for that pass.
 struct ItemBoxPress { const Kinoko::Field::ObjectItemboxPress* object=nullptr; uint16_t box=0,reveal=0xffff; bool taken=false; };
+// An s_itembox that landed on a drivable object it rides (retail RMCP calc 8082945c): its
+// position is the object's position plus this offset.
+struct ItemBoxRide { const Kinoko::Field::ObjectBase* object=nullptr; uint16_t box=0; Vec3 offset{}; };
 struct ItemActor {
     ItemKind kind=ItemKind::None;
     Vec3 position{}, previous{}, velocity{},flightDirection{0,0,1};
@@ -221,6 +224,7 @@ private:
     std::vector<ItemBoxMover> movers_;
     std::vector<ItemBoxLine> lines_;
     std::vector<ItemBoxPress> presses_;
+    std::vector<ItemBoxRide> rides_;
     void stepMovers();
     std::array<ItemActor,MaxActors> actors_{};
     std::array<bool,MaxActors> freeAtStepStart_{};

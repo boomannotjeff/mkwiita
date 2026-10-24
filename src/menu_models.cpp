@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <string>
 
 namespace mkw {
@@ -178,7 +179,20 @@ void MenuModels::update(Renderer& renderer,const MenuState& visual){
         const int clip=driver->animation->find(shownMachine_>=0?seatedClip(unsigned(shownMachine_/12),unsigned(shownMachine_%12)):"sel_wait");
         if(clip!=driverClip_){driver->animation->clearPoseTransition();driverFrame_=0;}
         driverClip_=clip;
+        // Seated set (driver_anim.brres, fn_1_30E710 8081eac4): channel 0 is
+        // PAT0 "wink" and there is no SRT0, so the eyes keep their bind
+        // textures/UVs and look ahead, not at the camera (that is sel_wait's
+        // PAT0/SRT0, fn_1_30E3D8). State 2/3 (fn_1_31F7C4) restarts the wink at
+        // frame 0 when the shown machine changes (and on the Vehicle OK, see
+        // draw); DriverModel calc (fn_1_31FB58 8082ff0c) restarts it on a
+        // 1-in-100 roll a frame.
+        if(shownMachine_>=0){
+            const int wink=driver->animation->face("wink");
+            if(wink!=driverFace_||shownMachine_!=winkMachine_){driverFace_=wink;winkFrame_=winkTicks_=0;winkMachine_=shownMachine_;}
+            for(;winkTicks_;--winkTicks_)winkFrame_=std::rand()%100?winkFrame_+1:0;
+        }else if(winkMachine_>=0){driverFace_=driver->animation->face("sel_wait");winkMachine_=-1;}
     }
+    winkTicks_=0;
     for(auto& e:entries_){
         const bool shown=(e->kind==Driver&&e->id==shownDriver_)||(e->kind==Background&&e->id==shownBackground_)||(e->kind==Machine&&e->id==shownMachine_);
         if(shown)e->used=clock_;
@@ -216,6 +230,7 @@ void MenuModels::prepare(Renderer& renderer,const MenuState& state){
 void MenuModels::reset(Renderer& renderer) {
     for(auto& e:entries_){if(e->job)e->job->cancel();renderer.retire(std::move(e->model));}
     entries_.clear();shownDriver_=shownBackground_=shownMachine_=-1;driverClip_=driverFace_=backgroundClip_=-1;
+    winkMachine_=-1;winkFrame_=winkTicks_=0;vehicleOk_=false;
 }
 void MenuModels::begin(Renderer& renderer) {
     renderer.setFov(Fov);renderer.setCourseLighting(false);
@@ -229,6 +244,10 @@ float MenuModels::backdropParallax(const Renderer& renderer){
     return renderer.stereoParallax(ModelDepth*stereo::GarageBackdropRatio);
 }
 void MenuModels::draw(Renderer& renderer,const MenuState& state,const UiTransitionView& motion) {
+    // The Vehicle OK (fn_1_336868 -> fn_1_31F7C4 state 3) restarts the wink.
+    const bool vehicleOk=state.page==UiPage::Vehicle&&motion.active&&!motion.entering&&!motion.back&&*motion.selectedControl;
+    if(vehicleOk&&!vehicleOk_)winkFrame_=0;
+    vehicleOk_=vehicleOk;
     if(auto* background=shownBackground_>=0?find(Background,shownBackground_):nullptr;background&&background->resident()) {
         // BackModelMgr::Update's original rates (USA808d5f18) continue across
         // selection pages; a page's age is not the model's animation clock.
@@ -263,7 +282,7 @@ void MenuModels::draw(Renderer& renderer,const MenuState& state,const UiTransiti
     auto* driver=shownDriver_>=0?find(Driver,shownDriver_):nullptr;
     if(!driver||!driver->resident())return;
     {const auto t0=svcGetSystemTick();
-    if(driver->animation)driver->animation->apply(*driver->model,driverClip_,float(driverFrame_),driverFrame_,driverFace_,float(driverFrame_));
+    if(driver->animation)driver->animation->apply(*driver->model,driverClip_,float(driverFrame_),driverFrame_,driverFace_,float(shownMachine_>=0?winkFrame_:driverFrame_));
     renderMetrics.skinMs+=float((svcGetSystemTick()-t0)*1000.0/SYSCLOCK_ARM11);}
     auto* machine=shownMachine_>=0?find(Machine,shownMachine_):nullptr;
     if(machine&&machine->resident()) {
