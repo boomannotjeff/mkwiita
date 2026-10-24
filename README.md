@@ -90,7 +90,9 @@ For the Retro Rewind edition, see [its quick start](#retro-rewind-edition).
 5. Launch **Mario Kart Wii** from the LiveArea and pick an empty license slot to make your license: the
    Vita's keyboard asks for its name.
 
-**Updating from 1.3.0:** build the game files again from the 1.4.0 source (the VPK and the game files must
+**Updating from 1.4.0:** just install the 1.4.1 VPK. It uses the same game files, so there is nothing to rebuild.
+
+**Updating from 1.3.0 or older:** build the game files again from the 1.4.1 source (the VPK and the game files must
 come from the same release). On the Vita, delete the old `.pak` files and the `models` folder in `ux0:data/mkw/`
 first, then copy the new files. Your licenses, times and ghosts stay.
 

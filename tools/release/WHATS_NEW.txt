@@ -1,11 +1,10 @@
-Blooper now shows up before the ink hits.
-Ink fades faster while you boost.
-Standstill charge: smoke - then sparks.
-Dropped bananas stop instead of sliding.
-Triple shells stay steady in a wheelie.
-Blue Shells now hit you in a wheelie.
-Run over racers shrunk by lightning.
-Explosions fixed: right size and look
-  (GBA Shy Guy Beach - Bowser's Castle).
-Stick up/down tilts the kart in the air.
-Smaller game files - faster builds.
+Bikes: legs only flail in cannons.
+Flame Runner drift keeps the leg in.
+Wario Bike handlebars stay attached.
+Dropped items land and stay put.
+Coin Runners: half the coins.
+Smaller coins on the minimap.
+Stick diagonals no longer double-move.
+Random courses vary between races.
+Time Trial ghosts stay centred.
+White main menu titles.
