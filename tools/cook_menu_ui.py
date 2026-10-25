@@ -154,7 +154,7 @@ def bake_border_loop(key,p,control,bindings,animations,animation_groups,render_a
   save(atlas_key,image,p)
  border_records.append(dict(key=key,control=control.stem,frames=period,duration=duration,rate=rate,center=[rect[0]+cx,rect[1]+cy,cw,ch],firstSlice=first_slice,sliceCount=len(border_slices)-first_slice,source=animations[index].relative_to(ROOT).as_posix(),frameHashes=[hashlib.sha256(image.tobytes()).hexdigest() for image in images]))
 
-def bake_panel(name,resource,states=('free','select'),exclude=(),bounds=None,overrides=None,hidden=(),group_states=None):
+def bake_panel(name,resource,states=('free','select'),exclude=(),bounds=None,overrides=None,hidden=(),group_states=None,window_frames=False):
  p=ROOT/'assets/menu-ui'/resource
  node_records[name]=pane_nodes(p)
  bindings=None;control=None
@@ -206,7 +206,7 @@ def bake_panel(name,resource,states=('free','select'),exclude=(),bounds=None,ove
    pane_overrides['black_base']={'alpha':128/255,'vertexColors':[vertex]*4}
   movie_panes=('black_base','black_base_00','black_base_01','black_base_02') if name=='mode' else ('black_base',) if name in ('main_button','main_multi','main_wifi','class','drift','vs','course','battle') else ()
   separate=tuple(sorted(dynamic_panes))
-  img,rect,panes=render_layout(p,source,animations,exclude=exclude,bounds=bounds,pane_overrides=pane_overrides,material_overrides=colors,animation_groups=animation_groups,exclude_exact=movie_panes+separate)
+  img,rect,panes=render_layout(p,source,animations,exclude=exclude,bounds=bounds,pane_overrides=pane_overrides,material_overrides=colors,animation_groups=animation_groups,exclude_exact=movie_panes+separate,window_frames=window_frames)
   # The state's clips recolour its text (RLMC TEV colour 0/1, targets 4-6 and 8-10):
   # the movie buttons' cream-gold captions. The layout alone holds only the grey default.
   for clip in animations:
@@ -224,7 +224,7 @@ def bake_panel(name,resource,states=('free','select'),exclude=(),bounds=None,ove
   first_dynamic=pictures.index(ordered[0]) if ordered else len(pictures)
   before=tuple(pictures[:first_dynamic])
   if ordered:
-   img,_,_=render_layout(p,source,animations,exclude=exclude,bounds=rect,pane_overrides=pane_overrides,material_overrides=colors,animation_groups=animation_groups,exclude_exact=movie_panes+separate,include=before)
+   img,_,_=render_layout(p,source,animations,exclude=exclude,bounds=rect,pane_overrides=pane_overrides,material_overrides=colors,animation_groups=animation_groups,exclude_exact=movie_panes+separate,include=before,window_frames=window_frames)
   key=name+('_'+state if state else '')
   save(key,img,p);panel_records[key]=rect
   pane_records[key]=panes
@@ -232,11 +232,11 @@ def bake_panel(name,resource,states=('free','select'),exclude=(),bounds=None,ove
   if movie_panes:
    movie_z=panes[movie_panes[0]]['z']
    for suffix,z_range in [('underlay',(-float('inf'),movie_z)),('overlay',(movie_z,float('inf')))]:
-    layer,_,_=render_layout(p,source,animations,exclude=exclude,bounds=rect,pane_overrides=pane_overrides,material_overrides=colors,animation_groups=animation_groups,exclude_exact=movie_panes+separate,z_range=z_range,include=before if ordered else None)
+    layer,_,_=render_layout(p,source,animations,exclude=exclude,bounds=rect,pane_overrides=pane_overrides,material_overrides=colors,animation_groups=animation_groups,exclude_exact=movie_panes+separate,z_range=z_range,include=before if ordered else None,window_frames=window_frames)
     save(key+'_'+suffix,layer,p);panel_records[key+'_'+suffix]=rect
     if suffix=='underlay':loop_key=key+'_'+suffix;loop_image=layer;loop_z=z_range
   bake_border_loop(loop_key,p,control,bindings,animations,animation_groups,
-                   dict(exclude=exclude,pane_overrides=pane_overrides,material_overrides=colors,animation_groups=animation_groups,exclude_exact=movie_panes+separate,z_range=loop_z,include=before if ordered else None),rect,loop_image)
+                   dict(exclude=exclude,pane_overrides=pane_overrides,material_overrides=colors,animation_groups=animation_groups,exclude_exact=movie_panes+separate,z_range=loop_z,include=before if ordered else None,window_frames=window_frames),rect,loop_image)
   for at,member in enumerate(ordered):
    begin=pictures.index(member)+1;end=pictures.index(ordered[at+1]) if at+1<len(ordered) else len(pictures)
    after=tuple(n for n in pictures[begin:end] if n not in movie_panes and not any(x in n for x in exclude))
@@ -246,7 +246,7 @@ def bake_panel(name,resource,states=('free','select'),exclude=(),bounds=None,ove
     for mask in range(1<<(at+1)):
      depth_overrides=dict(pane_overrides)
      for bit,film in enumerate(ordered[:at+1]):depth_overrides[film]={**depth_overrides.get(film,{}),'alpha':float(bool(mask&(1<<bit))),'visible':True}
-     tail,_,_=render_layout(p,source,animations,exclude=exclude,bounds=rect,pane_overrides=depth_overrides,material_overrides=colors,animation_groups=animation_groups,exclude_exact=movie_panes+separate,z_range=z_range,include=after)
+     tail,_,_=render_layout(p,source,animations,exclude=exclude,bounds=rect,pane_overrides=depth_overrides,material_overrides=colors,animation_groups=animation_groups,exclude_exact=movie_panes+separate,z_range=z_range,include=after,window_frames=window_frames)
      box=tail.getbbox()
      if not box:continue
      tail_key=f'panel_tail_{name}_{state}_{at}_{part}_{mask}'
@@ -433,7 +433,9 @@ def main():
   ('rule_left','MenuSingle/control/blyt/common_w134_rule_rap_yaji_l.brlyt',('text',)),
   ('rule_right','MenuSingle/control/blyt/common_w135_rule_rap_yaji_r.brlyt',('text',)),
  ]
- for name,resource,exclude in specs:bake_panel(name,resource,exclude=exclude)
+ # The license cards' Window_00 is a one-frame nw4r window (frame drawing in
+ # menu_layout.render_layout, PAL 0x8007D520).
+ for name,resource,exclude in specs:bake_panel(name,resource,exclude=exclude,window_frames=name=='license')
  # VSSettingRadioOption: its Choice group shows the chosen option (ChoiceOn: the
  # red checker and active_text) apart from the others (ChoiceOff).
  for name,choice in [('rule_option','ChoiceOff'),('rule_option_on','ChoiceOn')]:
@@ -447,7 +449,7 @@ def main():
  empty_license=['mii']+[f'{prefix}_{i:02d}' for prefix in ['cc50','cc100','cc150','cc_mirror'] for i in range(8)]
  empty_license+=['n_0_kinoko','n_1_flower','n_2_star','n_3_special','r_0_koura','r_1_banana','r_2_konoha','r_3_thunder','n_2_hatena','n_3_hatena','r_2_hatena','r_3_hatena']
  for position in ['top','bottom']:
-  bake_panel('license_'+position+'_empty','Title/button/blyt/common_w076_license_icon_tex_'+position+'.brlyt',hidden=empty_license)
+  bake_panel('license_'+position+'_empty','Title/button/blyt/common_w076_license_icon_tex_'+position+'.brlyt',hidden=empty_license,window_frames=True)
  # A used card's data panes, each baked alone and drawn into its pane (Composer::inPane):
  # the cup icons with their "?" stand-ins, and the trophy colours for the results grid.
  card=ROOT/'assets/menu-ui/Title/button/blyt/common_w076_license_icon_tex_top.brlyt'

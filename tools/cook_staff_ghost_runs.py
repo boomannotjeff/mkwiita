@@ -39,7 +39,9 @@ def compiler():
 
 def build_tool(cxx):
     sources = [p for p in (KINOKO / 'source').rglob('*.cc') if p.name != 'main.cc']
-    newest = max(p.stat().st_mtime for p in sources + [ROOT / 'tools/staff_ghost_run.cc', Path(__file__)])
+    # A header change can change any object (the patch edits headers too): rebuild them all.
+    headers = max(p.stat().st_mtime for d in ('source', 'include') for p in (KINOKO / d).rglob('*.hh'))
+    newest = max([headers] + [p.stat().st_mtime for p in sources + [ROOT / 'tools/staff_ghost_run.cc', Path(__file__)]])
     if TOOL.is_file() and TOOL.stat().st_mtime > newest:
         return
     objects = WORK / 'kinoko'
@@ -52,7 +54,7 @@ def build_tool(cxx):
 
     def compile_one(p):
         o = objects / (p.relative_to(KINOKO).as_posix().replace('/', '_') + '.o')
-        if not o.is_file() or o.stat().st_mtime < p.stat().st_mtime:
+        if not o.is_file() or o.stat().st_mtime < max(p.stat().st_mtime, headers):
             subprocess.run([cxx, *flags, '-c', str(p), '-o', str(o)], check=True)
         return str(o)
     with ThreadPoolExecutor(os.cpu_count() or 4) as pool:

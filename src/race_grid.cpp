@@ -6,6 +6,9 @@
 #include <game/system/RaceManager.hh>
 #include <game/system/KPadDirector.hh>
 #include <game/system/ResourceManager.hh>
+#include <game/system/CourseMap.hh>
+#include <game/system/map/MapdataStageInfo.hh>
+#include <egg/math/Vector.hh>
 #include <game/kart/KartObjectManager.hh>
 #include <game/kart/KartMove.hh>
 #include <game/kart/KartCollide.hh>
@@ -25,6 +28,61 @@ bool finite(Vec3 p){return std::isfinite(p.x)&&std::isfinite(p.y)&&std::isfinite
 Vec3 native(const Kinoko::EGG::Vector3f& p){return {p.x,p.y,p.z};}
 float horizontalProjection(Vec3 p,Vec3 a,Vec3 b){p.y=a.y=b.y=0;const Vec3 d=b-a;const float n=dot(d,d);return n>0.001f?dot(p-a,d)/n:1.f;}
 float projection(Vec3 p,Vec3 a,Vec3 b){const Vec3 d=b-a;const float n=dot(d,d);return n>0.001f?dot(p-a,d)/n:1.f;}
+// CheckpointHolder_computeMeanTotalDistance (0x80512370; recursion fn_1_1CB0, 0x80512064):
+// from the finish-line checkpoint, the mean over its next links of the link length (midpoint
+// to midpoint, MapdataCheckPoint::initCheckpointLinks) plus, unless the link returns to the
+// finish line, the same mean from the linked checkpoint. Memoised (each checkpoint's mean is
+// fixed), iterative; 0 without checkpoints.
+float meanCheckpointDistance(const void* bytes,size_t size){
+    using Kinoko::EGG::Vector2f;
+    if(!bytes||size<16)return 0;
+    const auto* b=static_cast<const uint8_t*>(bytes);
+    if(std::memcmp(b,"RKMD",4)||be32(b+4)>size||be32(b+4)<16)return 0;
+    size=be32(b+4);
+    const unsigned sections=be16(b+8),header=be16(b+10);
+    if(sections>64||header<16+sections*4||header>size)return 0;
+    size_t ckpt=0,ckph=0;
+    for(unsigned i=0;i<sections;++i){const size_t off=header+size_t(be32(b+16+4*i));
+        if(off>size||size-off<8)return 0;
+        if(!std::memcmp(b+off,"CKPT",4))ckpt=off;
+        if(!std::memcmp(b+off,"CKPH",4))ckph=off;
+    }
+    if(!ckpt||!ckph)return 0;
+    const unsigned count=be16(b+ckpt+4),paths=be16(b+ckph+4);
+    if(!count||count>255||ckpt+8+size_t(count)*20>size||ckph+8+size_t(paths)*16>size)return 0;
+    std::vector<Vector2f> mid(count);std::vector<std::array<uint8_t,6>> links(count);std::vector<uint8_t> linkCount(count,0);
+    int finish=-1;
+    for(unsigned i=0;i<count;++i){const auto* p=b+ckpt+8+i*20;
+        mid[i]=0.5f*(Vector2f(beFloat(p),beFloat(p+4))+Vector2f(beFloat(p+8),beFloat(p+12)));
+        if(int8_t(p[17])==0)finish=int(i); // check area 0: the finish line (the last one)
+    }
+    if(finish<0)return 0;
+    for(unsigned i=0;i<count;++i){const unsigned next=b[ckpt+8+i*20+19];
+        if(next!=0xff){if(next>=count)return 0;links[i][linkCount[i]++]=uint8_t(next);continue;}
+        // The last checkpoint of its CKPH group links to the first of each next group.
+        for(unsigned g=0;g<paths;++g){const auto* h=b+ckph+8+g*16;if(i<h[0]||i>=unsigned(h[0])+h[1])continue;
+            for(unsigned k=0;k<6;++k){const unsigned to=h[8+k];if(to==0xff)continue;if(to>=paths||b[ckph+8+to*16]>=count)return 0;links[i][linkCount[i]++]=b[ckph+8+to*16];}
+            break;
+        }
+    }
+    std::vector<float> value(count,0.f);std::vector<uint8_t> state(count,0); // 0 new, 1 open, 2 done
+    std::vector<std::pair<unsigned,unsigned>> stack;stack.reserve(count);
+    stack.push_back({unsigned(finish),0u});state[unsigned(finish)]=1;
+    while(!stack.empty()){
+        const unsigned id=stack.back().first,k=stack.back().second;
+        if(k<linkCount[id]){++stack.back().second;const unsigned n=links[id][k];
+            if(n!=unsigned(finish)&&state[n]==0){state[n]=1;stack.push_back({n,0u});}
+            continue;
+        }
+        float sum=0;
+        for(unsigned j=0;j<linkCount[id];++j){const unsigned n=links[id][j];
+            sum=sum+(mid[n]-mid[id]).length();
+            if(n!=unsigned(finish))sum=sum+value[n];
+        }
+        value[id]=linkCount[id]?sum/float(linkCount[id]):0.f;state[id]=2;stack.pop_back();
+    }
+    return value[unsigned(finish)];
+}
 }
 
 bool EnemyRoute::load(const void* bytes,size_t size,bool itemPath){
@@ -100,6 +158,44 @@ Vec3 EnemyRoute::target(unsigned segment,unsigned racer,Vec3 pos,float lookahead
     return z;
 }
 
+void RaceGrid::drawLineup(unsigned localDriver){
+    // The menus choose the CPU racers once per Grand Prix / VS set (RaceConfig menu
+    // scenario), with a time-seeded Util::Random. Every character and vehicle is
+    // unlocked in this port (characterIsUnlocked, fn_1_3FD18 always pass).
+    constexpr unsigned driverCount=GarageChoices.size()/VehiclesPerDriver;
+    std::array<unsigned,driverCount> driverOf{}; // retail character id -> garage driver
+    for(unsigned d=0;d<driverCount;++d)driverOf[GarageChoices[d*VehiclesPerDriver].character%driverCount]=d;
+    // getCharacterWeightClass (0x8081CD3C) is the class of the driver's twelve vehicles.
+    auto weight=[&](unsigned id){return GarageChoices[driverOf[id]*VehiclesPerDriver].vehicle%3;};
+    uint32_t rng=session_.seed?session_.seed:1;
+    auto next=[&](uint32_t limit){rng=rng*1664525u+1013904223u;return (rng>>8)%limit;};
+    // fn_1_32E874 (0x8083EC28): ids 0..23 (never a Mii) re-drawn until no earlier racer
+    // has it and its weight class holds fewer than (n + n%3)/3 racers, humans counted first.
+    const unsigned n=count_,limit=(n+n%3)/3;
+    std::array<unsigned,3> classes{};std::array<unsigned,Capacity> characters{};
+    characters[0]=GarageChoices[localDriver*VehiclesPerDriver].character%driverCount;++classes[weight(characters[0])];
+    for(unsigned i=1;i<n;++i){
+        unsigned id=next(driverCount);
+        while(classes[weight(id)]>=limit||std::find(characters.begin(),characters.begin()+i,id)!=characters.begin()+i)id=next(driverCount);
+        characters[i]=id;++classes[weight(id)];
+    }
+    // Vehicles. Battle (fn_1_32A9A0, 0x8083AD54): the class's standard kart (0/1/2) or bike
+    // (18/19/20), 50/50 when both are allowed. Races (fn_1_3370A8, 0x8084745C): a uniform
+    // pick of the class's twelve (class + 3k), re-drawn until the rule allows it
+    // (fn_1_30CC00: 0 karts < 18, 1 bikes 18..35, 2 both).
+    const unsigned rule=session_.vehicles;
+    for(unsigned i=1;i<n;++i){
+        const unsigned w=weight(characters[i]),d=driverOf[characters[i]];
+        unsigned vehicle;
+        if(session_.mode==Session::Mode::Battle){
+            const unsigned coin=next(2);
+            vehicle=rule==0?w:rule==1?18+w:coin==0?w:18+w;
+        }else do vehicle=w+3*next(12);while((rule==0&&vehicle>=18)||(rule==1&&vehicle<18));
+        unsigned slot=0;
+        for(unsigned s=0;s<VehiclesPerDriver;++s)if(GarageChoices[d*VehiclesPerDriver+s].vehicle==vehicle){slot=s;break;}
+        lineup_[i]=d*VehiclesPerDriver+slot;
+    }
+}
 void RaceGrid::configure(Kinoko::System::RaceConfig& config,unsigned localChoice,unsigned count){
     constexpr unsigned driverCount=GarageChoices.size()/VehiclesPerDriver;
     static_assert(GarageChoices.size()%VehiclesPerDriver==0&&driverCount>=Capacity);
@@ -111,26 +207,21 @@ void RaceGrid::configure(Kinoko::System::RaceConfig& config,unsigned localChoice
     // The grid: the set slots when they are a full permutation, else racer order.
     bool slotted=true;{std::array<bool,Capacity> used{};
         for(unsigned i=0;i<count_;++i){const unsigned slot=startSlots_[i];if(slot>=count_||used[slot]){slotted=false;break;}used[slot]=true;}}
+    // A new set (or another human driver) draws a new CPU line-up; restarts and the
+    // later races of a Grand Prix / VS set keep it.
+    if(count_>1&&(lineupPending_||lineupDriver_!=localDriver)){drawLineup(localDriver);lineupPending_=false;lineupDriver_=localDriver;}
     for(unsigned i=0;i<Capacity;++i){auto& p=scenario.players[i];
         p.startPosition=slotted&&i<count_?startSlots_[i]:0xff;
         if(i>=count_){p.type=Kinoko::System::RaceConfig::Player::Type::None;continue;}
-        // CPUs take each driver's standard kart, or standard bike (garage slot 3)
-        // in the bikes-only 100cc Grand Prix.
-        unsigned cpuVehicle=config.raceScenario().engineClass==1?3:0;
-        if(cpuVehicles_>=0){
-            // VS/Battle rules: a machine of the allowed kind for each CPU
-            // (garage slot order: karts 0,1,2,6,7,8; bikes 3,4,5,9,10,11).
-            constexpr unsigned Karts[6]={0,1,2,6,7,8},Bikes[6]={3,4,5,9,10,11};
-            uint32_t x=cpuSeed_^(i*2654435761u);x^=x>>16;x*=2246822519u;x^=x>>13;
-            const unsigned pick=x%12;
-            cpuVehicle=cpuVehicles_==1?Karts[pick%6]:cpuVehicles_==2?Bikes[pick%6]:pick;
-        }
-        choices_[i]=i?((localDriver+i)%driverCount)*VehiclesPerDriver+cpuVehicle:localChoice;
+        choices_[i]=i?lineup_[i]:localChoice;
+        // Time Trial ghost: racer 1 takes the recorded run's garage choice.
         if(i==1&&ghostChoice_>=0)choices_[i]=unsigned(ghostChoice_)%GarageChoices.size();
         const auto& choice=GarageChoices[choices_[i]];
         p.character=static_cast<Kinoko::Character>(choice.character);p.vehicle=static_cast<Kinoko::Vehicle>(choice.vehicle);
         p.type=i?Kinoko::System::RaceConfig::Player::Type::CPU:Kinoko::System::RaceConfig::Player::Type::Local;
-        p.driftIsAuto=i!=0;
+        // Retail CPUs drift manually (KPadAI: driftIsAuto 0, so AIControlBase::init picks
+        // the manual kart controller). The caller sets the human's transmission.
+        p.driftIsAuto=false;
     }
 }
 bool RaceGrid::reset(){
@@ -162,9 +253,12 @@ bool RaceGrid::reset(){
         return true;
     }
     size_t paramSize=0;const void* params=System::ResourceManager::Instance()->getFile("kartAISpdParam.bin",&paramSize,System::ArchiveId::Core);
-    // The chosen engine class and CPU level (VS rules; Normal otherwise).
     const unsigned engineClass=std::min<unsigned>(config->raceScenario().engineClass,2);
-    speedParamReady_=readCpuSpeedParam(params,paramSize,unsigned(config->raceScenario().course),engineClass,cpuLevel_,speedParam_);
+    const bool grandPrix=session_.mode==Session::Mode::GrandPrix,set=grandPrix||session_.mode==Session::Mode::Versus;
+    // AiHolder_initEngineClassAndCpuMode (0x8073999C): a Grand Prix's CPU mode is its engine
+    // class (50cc Easy, 100cc Normal, 150cc and Mirror Hard); VS takes the rules' CPU level.
+    const unsigned cpuMode=grandPrix?engineClass:cpuLevel_;
+    speedParamReady_=readCpuSpeedParam(params,paramSize,unsigned(config->raceScenario().course),engineClass,cpuMode,speedParam_,grandPrix,config->raceScenario().mirror);
     // Distance adapter: a permitted native ENPT circuit scales checkpoint lap
     // completion. Retail uses mean CKPT circuit length; branched-path parity remains pending.
     lapDistance_=0;std::vector<bool> visited(route_.size(),false);unsigned point=0;
@@ -175,13 +269,20 @@ bool RaceGrid::reset(){
     const float routeLength=lapDistance_;
     lapDistance_=std::clamp(lapDistance_,4500.f,9000.f);
     afterStep();
-    // Retail Enemy::AI (cpu_ai.cpp): the chosen engine class and CPU level (cpuMode).
-    CpuAi::Setup setup;setup.route=&route_;setup.count=count_;setup.engineClass=engineClass;setup.cpuMode=cpuLevel_;
+    // Retail Enemy::AI (cpu_ai.cpp): the chosen engine class and CPU mode.
+    CpuAi::Setup setup;setup.route=&route_;setup.count=count_;setup.engineClass=engineClass;setup.cpuMode=cpuMode;
     setup.speed=speedParam_;setup.speedReady=speedParamReady_;
     size_t actionSize=0;const void* actions=System::ResourceManager::Instance()->getFile("kartAIActionParam.bin",&actionSize,System::ArchiveId::Core);
     setup.actionsReady=readCpuActionParam(actions,actionSize,setup.cpuMode,setup.actions);
     if(!setup.actionsReady)for(auto& a:setup.actions)a={50,10,70,70,80,50,0,0};
-    setup.courseLength=std::max(routeLength,1000.f);setup.humanMask=ghostChoice_>=0&&count_>1?3:1;
+    // Rank distances use the mean checkpoint lap length (fn_1_22F088); the ENPT loop
+    // stays the fallback for a course without checkpoints.
+    const float checkpointLength=meanCheckpointDistance(kmp,size);
+    setup.courseLength=checkpointLength>0?checkpointLength:std::max(routeLength,1000.f);
+    setup.humanMask=ghostChoice_>=0&&count_>1?3:1;setup.inputOnlyHumans=config->raceScenario().isTimeTrial();
+    if(const auto* stage=System::CourseMap::Instance()->getStageInfo())setup.polePosition=stage->polePosition();
+    setup.startAtPointZero=!battleArena_;
+    if(set){setup.raceNumber=session_.raceNumber;setup.points=session_.points;}
     setup.seed=0x9e3779b9u^(unsigned(config->raceScenario().course)*2654435761u);
     ai_.reset(setup);
     return ok;
@@ -250,10 +351,17 @@ void RaceGrid::beforeStep(uint16_t bulletPlayers){
                 if(d.reverse){--d.reverse;buttons=2;aiStick=0;}
                 if(d.recoveries>=3){kart->collide()->activateOob(false,nullptr,true,false);d.recoveries=0;d.reverse=0;}
                 if(speed>20.f&&!d.reverse)d.recoveries=0;
-            }else if(!respawning&&manager->stage()==System::RaceManager::Stage::Countdown&&manager->getCountdownTimer()<24)buttons=1;
+            }else if(!respawning&&manager->stage()==System::RaceManager::Stage::Countdown){
+                // AIEngine countdown (fn_1_22252C): a CPU holds accelerate once the race
+                // frame passes its start boost's frame (0x808CA690), which charges exactly
+                // that boost. The QA autopilot keeps the last 24 frames.
+                constexpr uint16_t StartAccelFrame[7]={130,999,156,150,144,138,134}; // burnout, none, levels 1-5
+                if(i==0?manager->getCountdownTimer()<24:manager->timer()>StartAccelFrame[std::clamp(ai_.startBoostLevel(i)+1,0,6)])buttons=1;
+            }
             // Trick input from the retail AITrickHandler (CPU) / AIEngine command.
             const auto trick=racing&&!d.reverse?System::Trick(std::min<uint8_t>(command.trick,4)):System::Trick::None;
-            const int raw=std::clamp(7+int(std::lround(aiStick*7.f)),0,14);
+            // setStickXUnmirrored(7 + (int)(7 * stick)): truncation, as fn_1_2226BC.
+            const int raw=std::clamp(7+int(aiStick*7.f),0,14);
             pad->setInputsRawStick(buttons,unsigned(raw),7,trick);
             continue;
         }
@@ -538,16 +646,52 @@ uint16_t RaceGrid::bulletNoEndPlayers() const{
 void RaceGrid::afterStep(){
     auto* manager=Kinoko::System::RaceManager::Instance();if(!manager)return;
     forwardBumps();
+    // RaceinfoPlayer_endRace -> fn_1_238B8 (0x80533C6C): once the mode's end test passes
+    // (GP fn_1_25B74 / VS fn_1_25CA0: the local player has finished), RaceMode vf+0x24
+    // (fn_1_23880) calls vf+0xC (fn_1_25A34 0x80535DE8), which ends the race at once for
+    // every racer still running (fn_1_23F34 0x805342E8, forced). Finished racers use no
+    // items (ItemHolderPlayer_update 0x80797928) and their AI turns to post-race driving.
+    // Not ported: VS also ends when the local player is the only one left (fn_1_25CA0).
+    using Scenario=Kinoko::System::RaceConfig::Scenario;
+    const auto* config=Kinoko::System::RaceConfig::Instance();
+    if(config&&config->raceScenario().gameMode==Scenario::GameMode::Versus&&count_&&manager->player(0).finished())
+        for(unsigned i=1;i<count_;++i){
+            const auto& p=manager->player(i);if(p.finished())continue;
+            // fn_1_23F34's estimate: the current time x (laps + 1) / race completion, from
+            // 100 minutes x (laps + 2 - completion) before lap 1; fn_1_242D0 truncates the
+            // scaled milliseconds, then 17 ms is added (0x80890184).
+            // 0x8089017C + the laps (3 in retail; a Retro Rewind course's own count).
+            const float Finish=1.f+float(manager->lapCount());
+            const auto& now=manager->timerManager().currentTimer();
+            const bool started=p.raceCompletion()>1.f;
+            const float scale=started?float(double(Finish)/p.raceCompletion()):std::clamp(1.f+Finish-p.raceCompletion(),1.f,100.f);
+            const uint32_t base=started?(uint32_t(now.min)*60u+now.sec)*1000u+now.mil:100u*60000u;
+            const uint32_t ms=uint32_t(float(base)*scale);
+            const Kinoko::System::Timer t(uint16_t(ms/60000u),uint8_t(ms/1000u%60u),uint16_t(ms%1000u));
+            manager->endRaceEstimated(i,t+17.f);
+        }
     std::array<unsigned,Capacity> order{};for(unsigned i=0;i<count_;++i)order[i]=i;
     std::sort(order.begin(),order.begin()+count_,[&](unsigned a,unsigned b){
+        // A Time Trial ghost never takes a place from the player.
+        if(ghost(a)!=ghost(b))return ghost(b);
         const auto& x=manager->player(a);const auto& y=manager->player(b);
         if(x.finished()!=y.finished())return x.finished();
-        if(x.finished())return x.finishOrder()<y.finishOrder();
+        // fn_1_23324 (0x805336D8) ranks finished racers by 6000099 - time ms + 0.01 x index:
+        // the earlier time first, a tie to the higher index. Estimated times keep the order.
+        if(x.finished()){
+            auto ms=[](const Kinoko::System::Timer& t){return (uint32_t(t.min)*60u+t.sec)*1000u+t.mil;};
+            const uint32_t tx=ms(x.raceTimer()),ty=ms(y.raceTimer());
+            return tx!=ty?tx<ty:a>b;
+        }
         if(x.raceCompletion()!=y.raceCompletion())return x.raceCompletion()>y.raceCompletion();
         return a<b;
     });
     for(unsigned rank=0;rank<count_;++rank)ranks_[order[rank]]=rank+1;
-    for(unsigned i=0;i<count_;++i){const auto& p=manager->player(i);finished_[i]=p.finished();laps_[i]=unsigned(std::clamp<int>(p.currentLap(),1,manager->lapCount()));}
+    // Raceinfo maxLap (RaceinfoPlayer+0x26), not currentLap (+0x24): CtrlRaceLap
+    // (0x807EF810), JugemSwitchLap (0x80725BD8) and the AI all read it. endLap
+    // (0x805349B8) raises it only past the old max, so backing over the line
+    // (decrementLap) never lowers it. Running max of currentLap = maxLap.
+    for(unsigned i=0;i<count_;++i){const auto& p=manager->player(i);finished_[i]=p.finished();laps_[i]=std::max(laps_[i],unsigned(std::clamp<int>(p.currentLap(),1,manager->lapCount())));}
 }
 void RaceGrid::forwardBumps(){
     using namespace Kinoko;

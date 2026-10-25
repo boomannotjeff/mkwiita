@@ -94,6 +94,13 @@ for row in shadow_manifest['choices']:
  if digest_file(source)!=row['sha256']:raise ValueError('Vehicle shadow changed: '+str(relative))
  files[source]=relative
 files[shadow_root/'models/vehicle-shadows.json']=Path('models/vehicle-shadows.json')
+# Item and item-box shadow volumes (tools/cook_item_shadows.py).
+item_shadow_root=ROOT/'build/item-shadows'
+for row in json.loads((item_shadow_root/'models/item-shadows.json').read_text())['models']:
+ source=item_shadow_root/row['path']
+ if hashlib.sha256(source.read_bytes()).hexdigest()!=row['sha256']:raise ValueError('Item shadow changed: '+row['path'])
+ files[source]=Path(row['path'])
+files[item_shadow_root/'models/item-shadows.json']=Path('models/item-shadows.json')
 textures={'drift_sparkTex2','drift_flash2','drift_rk_smoke2'}
 files[assets/'textures/drift-effects.bin']=Path('textures/drift-effects.bin')
 files[assets/'textures/drift-effects-bike.bin']=Path('textures/drift-effects-bike.bin')

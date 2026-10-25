@@ -18,6 +18,18 @@ inline constexpr std::array<UiMainMenuControl,7> UiMainMenuControls{{
 }};
 // pageLeft/pageRight (L/R): the Retro Rewind edition's other cup pages.
 struct UiInput {bool up=false,down=false,left=false,right=false,accept=false,back=false,start=false,switchType=false,pageLeft=false,pageRight=false;};
+// MultiControlInputManager's direction hold: fn_1_DF4E4 (PAL 805ef898) counts
+// the 60 Hz frames one direction set is held, MultiControlInputManager_calc
+// (805f0e94) moves on frame 0 and on frames 15, 30, 45... Counted in display
+// frames, not loop passes. reset() is the page activation (fn_1_DF5A4).
+class UiDirectionRepeat {
+public:
+ // The directions held now; frames: 60 Hz frames since the previous step.
+ UiInput step(bool up,bool down,bool left,bool right,unsigned frames);
+ void reset(){mask_=0;held_=0;}
+private:
+ unsigned mask_=0,held_=0;
+};
 struct UiSelection {
  unsigned driver=0,vehicle=0,course=0;bool automatic=false;
  UiMode mode=UiMode::GrandPrix;UiEngineClass engineClass=UiEngineClass::CC150;
@@ -81,6 +93,9 @@ struct UiPauseMenu {const UiPauseButton* buttons;unsigned count;};
 class MenuState {
 public:
  UiPage page=UiPage::Strap;UiSelection selection{};
+ // The fastest usable ghost per course in milliseconds (0: none), filled in
+ // by the race runtime before the Time Trial ghost page.
+ std::array<uint32_t,32> ghostTimes{};
  unsigned cursor=0,age=0,focusAge=0;bool unavailable=false;
  // The Cup page shows eight cups: cupPage picks which (more than one page only in the Retro Rewind edition).
  unsigned cupPage=0;
@@ -110,6 +125,9 @@ public:
  void stepSetting(unsigned row,int direction);
  // An "Unlocked!" notice over the page (a Progress unlockable, -1 none): A or B closes it.
  int unlockNotice=-1;
+ // Frames since the menu section began: the section's MenuBG keeps running
+ // across its pages (MenuTransition carries it over each page change).
+ unsigned sectionAge=0;
  // Results is the retail VS end-of-race menu (VSRaceEnd): Next Race / Quit
  // Game, or only Next after the final race of a VS set (IsFinalRace).
  bool finalRace=false;
@@ -162,7 +180,9 @@ public:
  static bool raceVehicle(unsigned choice){return choice<12;}
  bool supportsRace()const;
 };
-struct UiQuad {unsigned sprite;float x,y,w,h,alpha=1;uint32_t tint=0xffffffff;bool bottom=false;float u0=0,v0=0,u1=1,v1=1;unsigned movie=~0u;std::array<uint32_t,4> corners{{0xffffffff,0xffffffff,0xffffffff,0xffffffff}};bool additive=false;unsigned vehicleIcon=~0u;uint32_t vehicleColor0=0,vehicleColor1=0xffffffff;};
+// material: the NW4R default material, lerp(color0,color1,texture) times the
+// corner colours (pane TEV C0/C1 applied live, e.g. a white glow silhouette).
+struct UiQuad {unsigned sprite;float x,y,w,h,alpha=1;uint32_t tint=0xffffffff;bool bottom=false;float u0=0,v0=0,u1=1,v1=1;unsigned movie=~0u;std::array<uint32_t,4> corners{{0xffffffff,0xffffffff,0xffffffff,0xffffffff}};bool additive=false;unsigned vehicleIcon=~0u;uint32_t vehicleColor0=0,vehicleColor1=0xffffffff;bool material=false;uint32_t color0=0,color1=0xffffffff;};
 struct UiRacer {unsigned driver=0,rank=1,lap=1;bool finished=false;float x=0,z=0;};
 struct UiRaceView {std::array<UiRacer,12> racers{};unsigned count=0;unsigned milliseconds=0;};
 // The same command list is consumed by Citro3D and the host layout preview.

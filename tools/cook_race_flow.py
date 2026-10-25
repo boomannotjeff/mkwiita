@@ -307,6 +307,11 @@ def emit_layout(prefix, layout, clips, texture_slot, header):
         header.append(f'    {{"{m["name"]}",{{{{{",".join(str(c) for c in m["c0"])}}}}},{{{{{",".join(str(c) for c in m["c1"])}}}}},'
                       f'{slot},{m["wrap"][0]},{m["wrap"][1]},{{{{{",".join(f(x) for x in m["srt"])}}}}}}},')
     header.append('};')
+    if not clips:
+        # A static layout: no clip, track or key tables.
+        header.append(f'inline constexpr FlowLayoutDef {prefix}Layout{{{prefix}Panes,{len(layout["panes"])},{prefix}Materials,'
+                      f'{len(layout["materials"])},nullptr,0,nullptr,nullptr}};')
+        return
     header.append(f'inline constexpr FlowClip {prefix}Clips[]={{')
     header += clip_lines
     header.append('};')

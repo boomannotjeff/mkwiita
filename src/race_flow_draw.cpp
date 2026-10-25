@@ -110,9 +110,8 @@ void occludedPicture(Batch& batch,const FlowPane& def,const FlowPanePose& pane,c
 // the text position places the line in the box; glyphs carry the top and
 // bottom vertex colours (per-glyph vertical gradient).
 template<class Batch>
-void textQuads(Batch& batch,const FlowPane& def,const FlowPanePose& pane,const Placement& at,const char* text){
+void textQuads(Batch& batch,const FlowPane& def,const FlowPanePose& pane,const Placement& at,const char* text,const FlowFont& font=FlowKanjiFont){
  if(!text||!*text)return;
- const auto& font=FlowKanjiFont;
  const float scaleX=def.fontW/float(font.width),scaleY=def.fontH/float(font.height);
  float width=0;unsigned n=0;
  for(const char* p=text;*p;++p)if(const auto* g=glyph(font,*p)){width+=float(g->advance)*scaleX;++n;}

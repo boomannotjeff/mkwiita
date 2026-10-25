@@ -39,8 +39,14 @@ struct Submesh { uint32_t first,count; int32_t texture; uint32_t flags; int32_t 
     // mode 3 adds C1 to the albedo without a reflection texture. World items
     // also use mode 4 (banana's raster lerp) and 6 (shell's raster-alpha mask).
     uint32_t menuReflection=0,reflectionConstant=0,reflectionAdd=0;
-    float reflectionUv[6]{}; };
-static_assert(offsetof(Submesh,menuReflection)==56&&sizeof(Submesh)==92,"GMDL v5 submesh stride");
+    float reflectionUv[6]{};
+    // GMDL v6: the GX sampler of texture units 0 (bits 0..15) and 1 (16..31):
+    // per unit the GX minFilter + 1 (0: unknown) and, at bit 8, the lodBias in
+    // signed 1/32 steps (tools/cook_model.py). Bit 3 (unit 0 only): a GX
+    // projection-mapped texgen, the camera's screen position through the
+    // texture SRT in reflectionUv (menuReflection 0; the sea's glow).
+    uint32_t sampler=0; };
+static_assert(offsetof(Submesh,menuReflection)==56&&offsetof(Submesh,sampler)==92&&sizeof(Submesh)==96,"GMDL v6 submesh stride");
 struct CourseLighting;
 struct RetailFog;
 class Texture {
@@ -323,7 +329,9 @@ public:
     // The same without copying the quads: a deferred frame reads them when it
     // is drawn, so they must not change until then (alternate storage on
     // recordingFrame()'s parity). Keeps per-frame storage fixed and preallocated.
-    void drawScreenMaterialQuadsInPlace(const Texture* texture,const MaterialQuad* quads,unsigned count,uint32_t color0,uint32_t color1);
+    // alphaRef >= 0 keeps only fragments whose alpha is at least alphaRef (a GX
+    // alpha compare GEQUAL, e.g. the minimap icon faces' 140).
+    void drawScreenMaterialQuadsInPlace(const Texture* texture,const MaterialQuad* quads,unsigned count,uint32_t color0,uint32_t color1,int alphaRef=-1);
     // Small native HUD font; geometry is batched and remains alive for the frame.
     void drawScreenText(const char* text,float x,float y,float scale,uint32_t rgba=0xffffffff);
     // Call after end(). Waits for the finished frame and copies the top-screen
@@ -332,6 +340,12 @@ public:
     bool captureTop(uint8_t* rgb,unsigned eye=0);
     // The same for the bottom screen's target (320*240*3 bytes); false without one.
     bool captureBottom(uint8_t* rgb);
+    // Outside a frame: the top screen's last frame (left eye) as a 256x512 RGBA8
+    // texture (VRAM, else LINEAR) laid out as bloom's scene texture: texel (x,y)
+    // is window (x,y). A GPU copy; false when neither memory has room.
+    bool captureTopTexture(Texture& texture);
+    // Draws such a capture over the whole top screen, opaque.
+    void drawTopCapture(const Texture& texture);
     // Whether the last finished frame showed both eyes (QA captures).
     bool stereoShown() const {return stereoShown_;}
     // QA, after captureTop of a stereo frame: whether the LCD framebuffer
@@ -357,6 +371,10 @@ public:
     // additiveColor with alpha 0x01 subtracts its colour instead (Blooper ink:
     // an inked racer's kart and driver are painted dark).
     static constexpr uint32_t InkColor=0xb4b4b401u;
+    // Whole-model opacity (Time Trial ghosts): below 1 the model blends at this
+    // constant alpha over what is drawn, writing no depth and no framebuffer alpha;
+    // 0 writes only the depth its opaque materials would (the ghost's first pass).
+    float modelAlpha=1;
 private:
     // Recording (src/render_thread.cpp).
     struct FrameList;
@@ -460,12 +478,13 @@ private:
     void screenFadeNow(float opacity,bool white);
     void spriteNow(const Texture& texture,float x,float y,float width,float height,float u0,float v0,float u1,float v1,float alpha,uint32_t rgba,const uint32_t* corners,bool additive,float angle);
     void fontSpriteNow(const Texture& texture,float x,float y,float width,float height,float u1,float v1,float alpha,uint32_t gradientTop,uint32_t gradientBottom,uint32_t color0,uint32_t color1);
-    void materialQuadsNow(const Texture* texture,const MaterialQuad* quads,unsigned count,uint32_t color0,uint32_t color1,int wrapS,int wrapT);
+    void materialQuadsNow(const Texture* texture,const MaterialQuad* quads,unsigned count,uint32_t color0,uint32_t color1,int wrapS,int wrapT,int alphaRef=-1);
     void textNow(const char* text,float x,float y,float size,uint32_t rgba);
     Vertex* reserveOverlay(int count);
     Stats stats_{};
     uint32_t execFrame_=0,execAdditive_=0;
     bool subtractAdditive_=false; // this draw's additive colour subtracts (ink)
+    float execAlpha_=1;
     C3D_RenderTarget* target_=nullptr;
     // Right eye (VRAM, New 3DS with a 3D screen only; linked to GFX_RIGHT).
     C3D_RenderTarget* targetRight_=nullptr;
@@ -485,6 +504,11 @@ private:
     int projectionLoc_=-1,modelViewLoc_=-1,lightLoc_=-1,uvScrollLoc_=-1;
     int envRowLoc_[3]={-1,-1,-1},envParamLoc_=-1,uv1RowLoc_[2]={-1,-1};
     int uvRowLoc_[4]={-1,-1,-1,-1},tintLoc_=-1;
+    // Unit 0 projection mapping (Submesh::sampler bit 3): its rows, the shader
+    // switch while set, and the projection-mode copy bound until the draw.
+    int projRowLoc_[3]={-1,-1,-1},projectedUv0Loc_=-1;
+    bool projectedUv0_=false;
+    C3D_Tex projectedTexture_{};
     bool uvDirty_=false,tintDirty_=false;
     void resetMaterialUniforms();
     // Retail course lighting (renderer_retail.cpp).

@@ -72,6 +72,10 @@ COOK_STEPS=[
  ('award ceremony',['{py}','tools/cook_ceremony.py','{disc}'],[SD+'/models/ceremony.json']),
  ('battle and award screens',['{py}','tools/cook_battle.py'],[SD+'/models/battle.json']),
  ('effect archives',['{py}','tools/cook_effect_archives.py'],[SD+'/models/effect-archives.json']),
+ # Item and item-box shadow volumes from Common.szs (drivers step) and Luigi Circuit's item box.
+ ('item shadows',['{py}','tools/cook_item_shadows.py'],['build/item-shadows/models/item-shadows.json']),
+ # The incoming-item warning icon, from the Race UI archives the items step unpacks.
+ ('item warning icons',['{py}','tools/cook_race_chase.py'],['build/vfx/textures/hud_chase_icon.t3x']),
  ('name balloons',['{py}','tools/cook_race_balloon.py'],['build/vfx/textures/hud_balloon_line.t3x']),
  ('race flow and results',['{py}','tools/cook_race_flow.py'],['build/race-flow/textures/flow_wipe.t3x']),
  ('audio',['{py}','tools/cook_audio.py'],['build/audio/audio/manifest.json']),

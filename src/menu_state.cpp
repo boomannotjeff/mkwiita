@@ -233,10 +233,24 @@ bool MenuState::supportsRace()const{
  return raceMode(selection.mode)&&(selection.mode!=UiMode::GrandPrix||raceEngineClass(selection.engineClass))&&raceDriver(selection.driver)&&raceVehicle(selection.vehicle)&&courseReady;
 }
 
-void MenuState::advance(unsigned ticks){age+=ticks;focusAge+=ticks;uiFocusAdvance(*this,ticks);}
+UiInput UiDirectionRepeat::step(bool up,bool down,bool left,bool right,unsigned frames){
+ // fn_1_DF4E4's mask: up 1 (else down 2), right 4 (else left 8). The count
+ // restarts only from or to no direction; fn_1_DF6BC fires at 0 and 15+15k.
+ const unsigned mask=(up?1u:down?2u:0u)|(right?4u:left?8u:0u);
+ auto repeats=[](unsigned held){return held<15?0u:(held-15)/15+1;};
+ const bool press=mask&&!mask_;const unsigned before=held_;
+ held_=mask&&mask_?held_+frames:0;mask_=mask;
+ UiInput key;
+ if(mask&&(press||repeats(held_)>repeats(before))){key.up=mask&1;key.down=mask&2;key.right=mask&4;key.left=mask&8;}
+ return key;
+}
+
+void MenuState::advance(unsigned ticks){age+=ticks;focusAge+=ticks;sectionAge+=ticks;uiFocusAdvance(*this,ticks);}
 
 void MenuState::enter(UiPage next){
  normalize(selection);
+ // Leaving the race (results, pause) is a section change: a new MenuBG.
+ if(retainsRaceAssets())sectionAge=0;
  page=next;age=focusAge=0;unavailable=locked=messageOpen=false;binding=-1;cursor=0;
  switch(page){
  case UiPage::License:cursor=selection.license;break;
@@ -267,7 +281,11 @@ UiAction MenuState::input(UiInput key){
  if(unlockNotice>=0){if(key.accept||key.back||key.start)unlockNotice=-1;return UiAction::None;}
  if(page==UiPage::Race){if(key.start)enter(UiPage::Pause);return UiAction::None;}
  if(messageOpen){if(key.accept||key.back)messageOpen=false;return UiAction::None;}
- if(page==UiPage::Pause&&(key.start||key.back)){enter(UiPage::Race);return UiAction::ResumeRace;}
+ // RaceMenuPage_onInit (PAL 0x80858D60) gives the pause pages only an input
+ // handler 2 (START), fn_1_349CE4 0x8085A098: close and resume. No page of
+ // the family has a Back handler, so B does nothing on Pause or QuitConfirm.
+ if(page==UiPage::Pause&&key.start){enter(UiPage::Race);return UiAction::ResumeRace;}
+ if((page==UiPage::Pause||page==UiPage::QuitConfirm)&&key.back)return UiAction::None;
  if(key.back){
   switch(page){
   case UiPage::Intro:case UiPage::License:enter(UiPage::Title);break;
@@ -463,17 +481,23 @@ UiAction MenuState::input(UiInput key){
   enter(UiPage::BattleStage);break;
  case UiPage::BattleStage:selection.battleStage=selection.battleStage/5*5+cursor;enter(UiPage::Confirm);break;
  case UiPage::Confirm:if(supportsRace())return UiAction::StartRace;unavailable=true;break;
+ // RaceMenuPage_onButtonFront (PAL 0x8085A0F4), by button id.
  case UiPage::Pause:
   switch(pauseMenu().buttons[cursor]){
   case UiPauseButton::Continue:enter(UiPage::Race);return UiAction::ResumeRace;
   case UiPauseButton::Restart:return UiAction::RestartRace;
   case UiPauseButton::ChangeCourse:enter(UiPage::Cup);break;
   case UiPauseButton::ChangeCharacter:enter(UiPage::Character);break;
-  case UiPauseButton::Quit:enter(UiPage::QuitConfirm);break;
+  // Case 1: with the section's confirmation page (0x2C, only Grand Prix
+  // section 0x1E among the single-player races) it pushes that page,
+  // otherwise it quits at once (section 0x41).
+  case UiPauseButton::Quit:enter(selection.mode==UiMode::GrandPrix?UiPage::QuitConfirm:UiPage::MainMenu);break;
   }
   break;
+ // Page 0x2C: ButtonConfirmQuit quits as case 1 does; ButtonConfirmContinue
+ // (case 0x17) closes the pages and resumes while paused.
  case UiPage::QuitConfirm:
-  if(cursor==0)enter(UiPage::MainMenu);else{enter(UiPage::Pause);cursor=pauseMenu().count-1;}break;
+  if(cursor==0)enter(UiPage::MainMenu);else{enter(UiPage::Race);return UiAction::ResumeRace;}break;
  case UiPage::Results:
   // RaceMenu::OnButtonClick (USA 0x80838664): Next goes to the VS course
   // choice (section 0x4B); Quit and the final race's Next return to the

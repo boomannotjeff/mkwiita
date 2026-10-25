@@ -42,6 +42,12 @@ struct RenderQuality {
     // course's map model) or, with map=0, the racing-line outline.
     unsigned framerate=60;
     bool wiiMap=true;
+    // minScreenRatio is tuned for the race camera's field of view (~60 degrees);
+    // a zoomed shot (the course intro's) draws objects larger, so the cut-off
+    // shrinks with it and never grows.
+    float zoomScale=1;
+    void setFov(float degrees){zoomScale=std::min(1.f,std::tan(degrees*(3.14159265f/360.f))/std::tan(30.f*(3.14159265f/180.f)));}
+    float minRatio() const{return minScreenRatio*zoomScale;}
     void setReduced(bool on){
         *this=RenderQuality{};
         if(!on)return;
@@ -52,7 +58,7 @@ struct RenderQuality {
     // True when bounds b placed by transform t are too small to draw from camera.
     bool tooSmall(const Bounds& b,const C3D_Mtx& t,Vec3 camera) const {
         if(minScreenRatio<=0)return false;
-        return screenRatio(b,t,camera)<minScreenRatio;
+        return screenRatio(b,t,camera)<minRatio();
     }
     static float screenRatio(const Bounds& b,const C3D_Mtx& t,Vec3 camera){
         const Vec3 c=(b.minimum+b.maximum)*.5f,h=(b.maximum-b.minimum)*.5f;
