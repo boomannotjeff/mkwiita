@@ -960,6 +960,14 @@ bool classifyObject(Visual& v,const ObjectAssets& assets,int course){
         v.present=drawPress;v.clips[0]=clip(v.main,"Press");
     }else if(!std::strcmp(v.resource,"coin")){
         v.present=drawCoin;v.kinetic=false;
+    }else if((id==ObjectId::FlamePoleV||id==ObjectId::FlamePoleVBig)&&live){
+        // Both load FlamePole_v (retail getResources 0x806C488C); the big one's
+        // flow entry lists FlamePole_v_big first, an archive no course has.
+        v.present=drawFlamePoleV;v.main=assets.tracks(assets.main("FlamePole_v"));v.low=v.shadow={};
+    }else if(id==ObjectId::TownBridge&&live){
+        v.present=drawTownBridge;
+    }else if((id==ObjectId::ObakeBlockSFCc||id==ObjectId::ObakeBlock2SFCc||id==ObjectId::ObakeBlock3SFCc)&&live){
+        v.present=drawObakeBlock;
     }else if(id==ObjectId::W_Woodbox&&live){
         // Retail's crate model is getKclName (0x8077ED7C): ironbox in time
         // trials (ObjectDirector +0x55), else woodbox.
