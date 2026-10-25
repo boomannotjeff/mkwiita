@@ -31,6 +31,19 @@ private:
 class RaceGrid {
 public:
     static constexpr unsigned Capacity=12;
+    // The menu RaceConfig a race runs under (retail RaceConfig +0xB70 game mode, +0xB8C race
+    // number, each player's points +0xD8, GlobalContext +0x74 vehicle rule). Set before the
+    // race scene is created; configure() and reset() read it.
+    struct Session {
+        enum class Mode : uint8_t { GrandPrix=0, Versus=1, TimeTrial=2, Battle=3 };
+        Mode mode=Mode::Versus;
+        unsigned vehicles=2;      // 0 karts only, 1 bikes only, 2 both
+        unsigned raceNumber=0;    // 0: the first race of the Grand Prix / VS set
+        std::array<uint16_t,Capacity> points{}; // every racer's points before this race
+        bool newLineup=true;      // a new set from the menus: draw the CPU racers again
+        uint32_t seed=1;          // the menus' Util::Random seed (retail: the OS time)
+    };
+    void setSession(const Session& session){session_=session;lineupPending_|=session.newLineup;}
     // Call within the RaceConfig init callback. Count=1 keeps a solo race.
     void configure(Kinoko::System::RaceConfig& config,unsigned localGarageChoice,unsigned count=Capacity);
     // Call after every scene creation/restart. Owns copies, never scene pointers.
@@ -71,6 +84,7 @@ public:
     struct BattleGoals {const Vec3* boxes=nullptr;unsigned boxCount=0;const Vec3* coins=nullptr;unsigned coinCount=0;uint16_t holding=0,safe=0;bool coinRunners=false;std::array<uint16_t,Capacity> scores{};};
     void setBattleGoals(const BattleGoals& goals){battleGoals_=goals;}
     CpuAi& ai(){return ai_;}
+    const CpuAi& ai()const{return ai_;}
 private:
     void forwardBumps();
     void battleDrive(unsigned racer,bool racing);
@@ -93,6 +107,7 @@ private:
         // leaves that lane or an approach fails: a fresh pick every tick
         // flips between lanes and leaves the kart dithering.
         unsigned navNode=EnemyRoute::Invalid,navLast=EnemyRoute::Invalid;bool navFinal=false;};
+    void drawLineup(unsigned localDriver);
     EnemyRoute route_,bulletRoute_;
     CpuAi ai_;
     std::array<Driver,Capacity> drivers_{};
@@ -103,5 +118,9 @@ private:
     unsigned cpuLevel_=1;int cpuVehicles_=-1;uint32_t cpuSeed_=0;int ghostChoice_=-1;
     BattleGoals battleGoals_{};std::vector<uint16_t> hop_;std::vector<float> navDist_;
     std::array<uint8_t,Capacity> startSlots_{0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff};
+    // The CPU line-up (garage choices), kept for every race of a Grand Prix / VS set.
+    Session session_{};
+    std::array<unsigned,Capacity> lineup_{};
+    unsigned lineupDriver_=~0u;bool lineupPending_=true;
 };
 }

@@ -28,6 +28,10 @@ public:
  // PushButton animation groups.
  void step(const RaceResultsFlow& flow);
  void drawResults(Renderer& renderer,const RaceResultsFlow& flow);
+ // The course preview banner (demo/cup_name + course_name): the mode line
+ // beside its icon (FlowIntroIcons index) at the top left, the course name at
+ // the bottom right, faded by alpha.
+ void drawIntro(Renderer& renderer,const char* mode,unsigned icon,const char* course,float alpha);
  // The award ceremony's two-column standings instead of the race board.
  void setAwardLayout(bool award);
 private:

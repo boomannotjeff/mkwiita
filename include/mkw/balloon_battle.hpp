@@ -20,7 +20,7 @@ class BalloonBattle {
 public:
     static constexpr unsigned MaxRacers = 12;
     static constexpr unsigned StartingBalloons = 3;
-    static constexpr unsigned MaxBalloons = 5;
+    static constexpr unsigned MaxBalloons = 5; // fn_1_359D28: `count < 5`
     static constexpr unsigned DurationTicks = 180 * 60;
     static constexpr unsigned SafeTicks = 90;      // after losing a balloon
     static constexpr unsigned PopupTicks = 60;     // "+1" / "-1" shown this long
@@ -90,7 +90,8 @@ public:
 
     // A dash into an enemy takes one of their balloons.
     bool steal(unsigned thief, unsigned victim) {
-        if (mode_ != Mode::Balloon || !enemies(thief, victim) || safe_[victim] || !balloons_[victim]) return false;
+        // Only a racer that still has balloons can steal (fn_1_359D28).
+        if (mode_ != Mode::Balloon || !enemies(thief, victim) || safe_[victim] || !balloons_[victim] || !balloons_[thief]) return false;
         if (!hit(victim, thief)) return false;
         if (balloons_[thief] < MaxBalloons) ++balloons_[thief];
         return true;

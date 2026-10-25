@@ -6,6 +6,8 @@
 #include <mkw/menu_ui.hpp>
 #include <mkw/menu_transition.hpp>
 #include <mkw/menu_assets.hpp>
+#include <mkw/controls.hpp>
+#include <mkw/progress.hpp>
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -22,7 +24,7 @@ static void record(const std::vector<UiQuad>& quads){
 }
 int main(int argc,char** argv){
  if(argc<2){std::fprintf(stderr,"usage: %s output.json\n",argv[0]);return 2;}
- const UiPage pages[]={UiPage::Strap,UiPage::Intro,UiPage::Title,UiPage::License,UiPage::MainMenu,UiPage::Mode,UiPage::EngineClass,UiPage::VSMode,UiPage::BattleMode,UiPage::Rules,UiPage::Character,UiPage::Vehicle,UiPage::Drift,UiPage::Cup,UiPage::Course,UiPage::BattleCup,UiPage::BattleStage,UiPage::Ghost,UiPage::Confirm,UiPage::Pause,UiPage::QuitConfirm,UiPage::Results,UiPage::Error};
+ const UiPage pages[]={UiPage::Strap,UiPage::Intro,UiPage::Title,UiPage::License,UiPage::MainMenu,UiPage::Mode,UiPage::EngineClass,UiPage::VSMode,UiPage::BattleMode,UiPage::Rules,UiPage::Character,UiPage::Vehicle,UiPage::Drift,UiPage::Cup,UiPage::Course,UiPage::BattleCup,UiPage::BattleStage,UiPage::Ghost,UiPage::Confirm,UiPage::Pause,UiPage::QuitConfirm,UiPage::Results,UiPage::Error,UiPage::Options,UiPage::Controls,UiPage::GameSettings,UiPage::LicenseSettings,UiPage::Records,UiPage::EraseLicense};
  UiRaceView race{};race.count=12;for(unsigned i=0;i<12;++i){race.racers[i].driver=i;race.racers[i].rank=i+1;}
  std::vector<UiQuad> q;
  for(UiPage page:pages)for(unsigned mode=0;mode<4;++mode)for(unsigned variant=0;variant<24;++variant)for(int mixed=0;mixed<2;++mixed){
@@ -34,6 +36,13 @@ int main(int argc,char** argv){
   s.selection.cpuLevel=variant%3;s.selection.cpuVehicles=(variant/3)%3;s.selection.courseOrder=(variant/9)%3;
   s.selection.itemMode=variant%(mode==unsigned(UiMode::Battle)?3:4);
   s.selection.raceCount=UiRaceCounts[variant%UiRaceCounts.size()];s.selection.battleWins=UiBattleWins[variant%UiBattleWins.size()];
+  // Options: both control presets and every settings value.
+  s.binding=page==UiPage::Controls?int(variant%(ControlActionCount+1))-1:-1;s.settings={variant%2==0,variant/2%2==0,variant/4%2!=0};progress().unlockAll=variant/4%2;s.recordsCup=variant%RaceCupCount;
+  // License cards: every trophy colour in every cell, the cups open or not.
+  for(unsigned l=0;l<2;++l){auto& lic=progress().license[l];lic.used=true;lic.name[0]='A';lic.name[1]=0;
+   for(unsigned k=0;k<4;++k)for(unsigned c=0;c<8;++c)lic.trophy[k][c]=uint8_t((variant+k+c+l)%4*(variant%3!=0));}
+  // Ghost page: no ghost, or 1-3 ghost cards (own, staff, expert).
+  s.ghostCount=variant%4;for(unsigned g=0;g<s.ghostCount;++g)s.ghostCards[g]={g,variant%24,variant%12,90000};s.showGhost(variant/4%3);
   s.enter(page);
   for(unsigned cursor=0;cursor<s.count();++cursor){
    MenuState t=s;t.cursor=cursor;
@@ -41,6 +50,7 @@ int main(int argc,char** argv){
     MenuState u=t;u.advance(age);
     composeMenu(u,race,q);record(q);
     u.unavailable=true;composeMenu(u,race,q);record(q);u.unavailable=false;
+    u.messageOpen=true;composeMenu(u,race,q);record(q);u.messageOpen=false;
    }
    if(variant>1&&page!=UiPage::Character&&page!=UiPage::Vehicle)continue;
    for(int back=0;back<2;++back){

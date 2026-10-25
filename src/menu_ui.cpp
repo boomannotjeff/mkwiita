@@ -8,10 +8,13 @@
 #include <mkw/menu_text_motion.hpp>
 #include <mkw/progress.hpp>
 #include <mkw/garage_skins.hpp>
+#include <mkw/controls.hpp>
+#include <mkw/staff_ghost_info.hpp>
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <functional>
 
 namespace mkw {
 namespace {
@@ -149,32 +152,125 @@ public:
   out.push_back({i,l,t,r-l,b-t,alpha,tint,false,(l-x)/w,(t-y)/h,(r-x)/w,(b-y)/h});
  }
  void sprite(const char* key,float x,float y,float w,float h,float a=1,uint32_t tint=0xffffffff,Pose p={}){quad(uiFindSpriteKey(key),x,y,w,h,a,tint,p);}
- void region(const char* key,float x,float y,float w,float h,float u0,float v0,float u1,float v1,Pose p,float alpha,const char* focusKey=nullptr){
+ // focus: panelFocus() of the panel this region belongs to.
+ void region(const char* key,float x,float y,float w,float h,float u0,float v0,float u1,float v1,Pose p,float alpha,const UiTextMotion& focus){
   x=p.x+x*p.sx;y=-p.y+y*p.sy;w*=p.sx;h*=p.sy;
-  applyMotion(x,y,w,h,alpha,p,panelFocus(focusKey?focusKey:key,p));
+  applyMotion(x,y,w,h,alpha,p,focus);
   const auto first=out.size();sprite(key,x,y,w,h,alpha,0xffffffff,p);
   if(out.size()>first){auto& q=out.back();q.u0=u0+(u1-u0)*q.u0;q.u1=u0+(u1-u0)*q.u1;q.v0=v0+(v1-v0)*q.v0;q.v1=v0+(v1-v0)*q.v1;}
  }
- void panel(const char* key,Pose p={},float alpha=1){
+ // A focusable button's live animation state, when this pose is bound to it.
+ bool boundFocus(Pose p,UiFocusView& view)const{
+  if(!p.source||p.focusSlot>=UiFocusControlCount)return false;
+  view=uiFocusAnimation(state,p.focusSlot);
+  return !std::strcmp(view.control,p.source);
+ }
+ // PushButton Loop group frame (source frames) for a flattened free/select
+ // panel: frame 30 held while Free (PAL 805bdd98), otherwise running.
+ float buttonLoop(const char* key,Pose p,const UiAnimationClip* clip)const{
+  const float rate=clip?clip->rate:1.f;
+  if(UiFocusView view;boundFocus(p,view))return view.loop;
+  if(std::strstr(key,"_free"))return UiFocusFreeLoopFrame;
+  return float(state.age)*rate;
+ }
+ void panel(const char* key,Pose p={},float alpha=1,const std::function<void()>& beforeTails={}){
   const auto* found=uiFindPanel(key);if(!found)return;const auto& r=*found;
+  // One sample of the panel's animated parent serves every part drawn below.
+  const auto focus=panelFocus(key,p);
   if(const auto* border=uiFindBorderLoop(key)){const auto& loop=*border;
-   region(key,loop.x,loop.y,loop.w,loop.h,(loop.x-r.x)/r.w,(loop.y-r.y)/r.h,(loop.x+loop.w-r.x)/r.w,(loop.y+loop.h-r.y)/r.h,p,alpha);
+   region(key,loop.x,loop.y,loop.w,loop.h,(loop.x-r.x)/r.w,(loop.y-r.y)/r.h,(loop.x+loop.w-r.x)/r.w,(loop.y+loop.h-r.y)/r.h,p,alpha,focus);
    const auto* clip=uiFindAnimationClip(loop.control,"Loop","Loop");
-   const float sourceFrame=clip&&clip->duration>0?std::fmod(float(state.age)*clip->rate,clip->duration):float(state.age);
+   const float loopFrame=buttonLoop(key,p,clip);
+   const float sourceFrame=clip&&clip->duration>0?std::fmod(loopFrame,clip->duration):loopFrame;
    const unsigned frame=unsigned(sourceFrame)%loop.frames;
    for(unsigned at=loop.firstSlice;at<loop.firstSlice+loop.sliceCount;++at){const auto& slice=UiBorderSlices[at];
     // Residency is keyed by page/selection, not loop frame. Every atlas a
     // future frame can use must be requested before the page is revealed.
-    const bool resident=transition&&transition->preload&&(at==loop.firstSlice||std::strcmp(slice.key,UiBorderSlices[at-1].key));
-    if(slice.frame==frame||resident)region(slice.key,slice.x,slice.y,slice.w,slice.h,slice.u0,slice.v0,slice.u1,slice.v1,p,alpha,key);
+    // Identical literals share one address: compare characters only when not.
+    const bool resident=transition&&transition->preload&&(at==loop.firstSlice||(slice.key!=UiBorderSlices[at-1].key&&std::strcmp(slice.key,UiBorderSlices[at-1].key)));
+    if(slice.frame==frame||resident)region(slice.key,slice.x,slice.y,slice.w,slice.h,slice.u0,slice.v0,slice.u1,slice.v1,p,alpha,focus);
    }
+   films(key,p,alpha,focus,beforeTails);
    return;
   }
-  float x=p.x+r.x*p.sx,y=-p.y+r.y*p.sy,w=r.w*p.sx,h=r.h*p.sy;
+  float x=p.x+r.x*p.sx,y=-p.y+r.y*p.sy,w=r.w*p.sx,h=r.h*p.sy,a=alpha;
   // These flattened button panels share an animated parent. Per-pane
   // submissions (movies, icons, text) sample their full ancestry separately.
-  applyMotion(x,y,w,h,alpha,p,panelFocus(key,p));
-  sprite(key,x,y,w,h,alpha,0xffffffff,p);
+  applyMotion(x,y,w,h,a,p,focus);
+  sprite(key,x,y,w,h,a,0xffffffff,p);
+  films(key,p,alpha,focus,beforeTails);
+ }
+ // The live pose of an independently animated film pane (color_down,
+ // pikapika, waku_light), relative to the selected reference it was baked in.
+ UiTextMotion filmMotion(const UiPaneInfo& info,Pose p,bool select)const{
+  if((transition&&transition->preload)||!p.source)return {};
+  const auto* reference=uiFindAnimationClip(p.source,"Select","Select");
+  UiFocusView view;const bool live=boundFocus(p,view)&&view.clip;
+  const UiAnimationClip* clip=live?view.clip:uiFindAnimationClip(p.source,"Select",select?"Select":"Free");
+  if(!clip)return {};
+  return uiTextMotion(info,{{clip,live?view.frame:0.f,0,reference}});
+ }
+ // bake_panel flattens a button only up to its first independently animated
+ // picture: those films (UiFocusSprites) and the panes submitted after them
+ // (UiPanelTails, with/without each film's depth) are composed here, in the
+ // original submission order. part: 0 plain, 1 below / 2 above the movie.
+ // root: panelFocus() of key, the same pane its tails were baked under.
+ // beforeTails: panes the layout submits between a film and its tail
+ // pictures (main menu: text_sha/text/text_light before Picture_02/01).
+ void films(const char* key,Pose p,float alpha,const UiTextMotion& root,const std::function<void()>& beforeTails={}){
+  char family[64];std::snprintf(family,sizeof family,"%s",key);
+  auto cut=[&](const char* suffix){const size_t n=std::strlen(family),m=std::strlen(suffix);if(n>m&&!std::strcmp(family+n-m,suffix)){family[n-m]=0;return true;}return false;};
+  unsigned part=0;if(cut("_underlay"))part=1;else if(cut("_overlay"))part=2;
+  unsigned select;if(cut("_select"))select=1;else if(cut("_free"))select=0;else return;
+  const UiFocusSprite* ordered[4]{};unsigned count=0;
+  for(const auto& f:UiFocusSprites)if(!std::strcmp(f.panel,family))for(unsigned bit=0;bit<4;++bit)if(f.depthBit==1u<<bit){ordered[bit]=&f;count=std::max(count,bit+1);}
+  if(!count)return;
+  const bool preload=transition&&transition->preload;
+  const Name stateKey(family,select?"_select":"_free"),selectKey(family,"_select");
+  unsigned mask=0;
+  for(unsigned i=0;i<count;++i){
+   const auto* f=ordered[i];if(!f)continue;
+   const auto* info=pane(selectKey,f->pane);const auto* baked=select?info:pane(stateKey,f->pane);
+   const auto motion=info?filmMotion(*info,p,select):UiTextMotion{};
+   // A film writes depth only when it is drawn at all (render_layout skips
+   // transparent panes); its tails were baked for both cases.
+   float live=motion.evaluated?(motion.visible?motion.absolute:0.f):baked&&baked->visible?baked->alpha:0.f;
+   if(live*255.f>=.5f)mask|=1u<<i;
+   if(preload)live=1;
+   if((part==0||f->part==part)&&live>0)if(const auto* r=uiFindPanel(f->key)){
+    float x=p.x+r->x*p.sx,y=-p.y+r->y*p.sy,w=r->w*p.sx,h=r->h*p.sy,ignored=1;
+    UiTextMotion shape=motion;shape.visible=true;
+    applyMotion(x,y,w,h,ignored,p,shape);
+    const auto first=out.size();sprite(f->key,x,y,w,h,alpha*std::clamp(live,0.f,1.f),0xffffffff,p);
+    if(out.size()>first)out.back().additive=f->blend!=0;
+   }
+   if(i==0&&beforeTails)beforeTails();
+   // ButtonMachine (PAL 808478f4) hides "hatena", the locked-vehicle "?",
+   // once the machine's thumbnail is set; every machine here is unlocked.
+   // The cook baked it into the vehicle tail, whose other pictures are the
+   // edge strips (|x| >= 65): draw the tail without the hatena columns.
+   const auto* hidden=!std::strcmp(family,"vehicle")?pane(stateKey,"hatena"):nullptr;
+   for(const auto& t:UiPanelTails){
+    if(t.part!=part||std::strcmp(t.panel,family)||std::strcmp(t.after,f->pane))continue;
+    auto tail=[&](const char* k){
+     const auto* r=*k?uiFindPanel(k):nullptr;if(!r)return;
+     if(hidden&&hidden->w>0){
+      // A resampling margin; nothing else lies within 40 units of hatena.
+      constexpr float Margin=4.f;
+      const float cut0=std::clamp(hidden->x-Margin,r->x,r->x+r->w),cut1=std::clamp(hidden->x+hidden->w+Margin,r->x,r->x+r->w);
+      if(cut0>r->x)region(k,r->x,r->y,cut0-r->x,r->h,0,0,(cut0-r->x)/r->w,1,p,alpha,root);
+      if(cut1<r->x+r->w)region(k,cut1,r->y,r->x+r->w-cut1,r->h,(cut1-r->x)/r->w,0,1,1,p,alpha,root);
+      return;
+     }
+     float x=p.x+r->x*p.sx,y=-p.y+r->y*p.sy,w=r->w*p.sx,h=r->h*p.sy,a=alpha;
+     applyMotion(x,y,w,h,a,p,root);
+     sprite(k,x,y,w,h,a,0xffffffff,p);
+    };
+    // Residency covers every tail a film transition can reveal.
+    if(preload){for(const auto& variants:t.keys)for(unsigned m=0;m<(2u<<i)&&m<4;++m)tail(variants[m]);}
+    else tail(t.keys[select][mask&((2u<<i)-1u)]);
+   }
+  }
  }
  void graph(float fraction,Pose p){
   fraction=std::clamp(fraction,0.f,1.f);if(fraction<=0)return;
@@ -193,6 +289,9 @@ public:
    sprite(key,x,y,w,h,alpha,0xffffffff,p);
    if(out.size()==before)return;
    auto& q=out.back();
+   // One colour on all four corners interpolates to itself exactly.
+   const auto& c=r->vertexColors;
+   if(c[0]==c[1]&&c[0]==c[2]&&c[0]==c[3]){q.corners={c[0],c[0],c[0],c[0]};return;}
    auto colorAt=[&](float u,float v){uint32_t color=0;
     for(unsigned shift:{24u,16u,8u,0u}){
      const float a=float((r->vertexColors[0]>>shift)&255),b=float((r->vertexColors[1]>>shift)&255),c=float((r->vertexColors[2]>>shift)&255),d=float((r->vertexColors[3]>>shift)&255);
@@ -222,7 +321,7 @@ public:
   float alpha=pane.alpha;
   // Sample the pane and its ancestors, including independent X/Y scaling.
   // OK glows already receive their explicit confirmation transform in glow().
-  if(p.source&&!(transition&&transition->preload)&&!std::strstr(pane.panel,"_ok")){
+  if(p.source&&!(transition&&transition->preload)&&!std::strstr(pane.panel,"_ok")&&!std::strstr(pane.panel,"_selectin")){
    auto frame=[](const UiAnimationClip* clip,float age){
     if(!clip)return 0.f;
     float f=age*clip->rate;
@@ -239,10 +338,15 @@ public:
    const auto focus=uiFocusAnimation(state,p.focusSlot);
    const bool bound=p.focusSlot<UiFocusControlCount&&!std::strcmp(focus.control,p.source);
    const auto* reference=bound?uiFindAnimationClip(p.source,"Select",std::strstr(pane.panel,"_free")?"Free":"Select"):nullptr;
+   // SelectIn also binds the caption itself in some layouts (common_w004's
+   // text squash); the panels were baked with its SelectStop pose.
+   const UiAnimationClip* in=nullptr;float inFrame=0;selectInClip(p,in,inFrame);
+   const auto* stop=in?uiFindAnimationClip(p.source,"SelectIn","SelectStop"):nullptr;
    const auto motion=uiTextMotion(pane,{{fade,frame(fade,float(state.age)),fade?fade->duration-1:0},
                                        {bound?focus.clip:nullptr,focus.frame,0,reference},
                                        {loop,frame(loop,float(state.age)),frame(loop,0)},
-                                       {press,frame(press,pressed?transition->holdFrame:0),frame(press,0)}});
+                                       {press,frame(press,pressed?transition->holdFrame:0),frame(press,0)},
+                                       {stop?in:nullptr,inFrame,0,stop}});
    if(!motion.visible)return;
    if(p.sx!=0&&p.sy!=0){
     const float localX=(x-p.x)/p.sx,localY=-(y+p.y)/p.sy;
@@ -279,12 +383,25 @@ public:
    UiPaneInfo one=*r;one.x=x;one.w=UiSprites[glyph[k]].w*scale;one.textAlign=0;
    textSprite(glyph[k],one,p,tint);x+=one.w;}
  }
- void icon(const char* prefix,unsigned i,const char* base,const char* name,Pose p={},float a=1,bool hidden=false){char key[64];std::snprintf(key,sizeof key,"%s%u",prefix,i);inPane(key,base,name,p,a,hidden);}
- // A focusable button's live animation state, when this pose is bound to it.
- bool boundFocus(Pose p,UiFocusView& view)const{
-  if(!p.source||p.focusSlot>=UiFocusControlCount)return false;
-  view=uiFocusAnimation(state,p.focusSlot);
-  return !std::strcmp(view.control,p.source);
+ void icon(const char* prefix,unsigned i,const char* base,const char* name,Pose p={},float a=1,uint32_t tint=0xffffffff,bool hidden=false){
+  char key[64];std::snprintf(key,sizeof key,"%s%u",prefix,i);
+  const auto first=out.size();inPane(key,base,name,p,a,hidden);
+  if(out.size()>first)out.back().tint=tint;
+ }
+ // A pane material's TEV colour register C1 (RLMC 8..10) as a tint: exact for
+ // C0 = black, where the default material reduces to texture x C1. The
+ // button's Select group animates it (the class icon dims to 160 when free).
+ uint32_t materialTint(Pose p,const char* family,const char* material,bool select)const{
+  const auto* node=uiFindPaneNode(family,material);
+  float c1[3]={255,255,255};if(node)for(unsigned k=0;k<3;++k)c1[k]=node->materialColors[1][k];
+  UiFocusView view;const bool live=boundFocus(p,view)&&view.clip;
+  const UiAnimationClip* clip=live?view.clip:p.source?uiFindAnimationClip(p.source,"Select",select?"Select":"Free"):nullptr;
+  uint32_t tint=0xff;
+  for(unsigned k=0;k<3;++k){
+   const float v=clip?uiAnimationValue(*clip,material,"RLMC",8+k,live?view.frame:0.f,c1[k]):c1[k];
+   tint|=uint32_t(std::clamp(std::lround(v),0l,255l))<<(24-8*k);
+  }
+  return tint;
  }
  // MovieLayout draws a movie pane with its own TEV (PAL fn_1_EB7AC 805fbb60)
  // and reads the pane material's texture SRT rotation, rounded, as a mode.
@@ -343,10 +460,75 @@ public:
    for(auto at=first;at<out.size();++at){out[at].alpha*=alpha;out[at].additive=g.blend!=0;}
   }
  }
+ // The OK press confirming this button: PushButton's front handler (PAL
+ // 805be358) restarts SelectIn together with OK, frame0 at the press.
+ bool confirmingButton(Pose p)const{
+  if(!transition||transition->entering||(!transition->active&&!transition->confirming)||transition->back)return false;
+  if(!p.source||std::strcmp(p.source,transition->selectedControl))return false;
+  return p.focusSlot>=UiFocusButtonCount||p.focusSlot==state.cursor;
+ }
+ // The SelectIn group clip and source frame currently applied to a button.
+ bool selectInClip(Pose p,const UiAnimationClip*& clip,float& frame)const{
+  clip=nullptr;frame=0;
+  if(!p.source||(transition&&transition->preload))return false;
+  if(confirmingButton(p)){
+   clip=uiFindAnimationClip(p.source,"SelectIn","SelectIn");if(!clip)return false;
+   frame=transition->holdFrame*clip->rate;
+   if(frame>=clip->duration){
+    const auto* next=*clip->next?uiFindAnimationClip(p.source,"SelectIn",clip->next):nullptr;
+    if(!next){frame=clip->duration;return true;}
+    frame-=clip->duration;clip=next;if(clip->loop&&clip->duration>0)frame=std::fmod(frame,clip->duration);
+   }
+   return true;
+  }
+  UiFocusView view;if(!boundFocus(p,view)||!view.selectIn)return false;
+  clip=view.selectIn;frame=view.selectInFrame;return true;
+ }
+ // PushButton group 2 (SelectIn): the light burst a button plays whenever it
+ // becomes selected (and again on OK). It keeps playing after a deselect.
+ // Character, cup and vehicle panes carry the selected icon's own image
+ // (LayoutUIControl_setPicture on chara_light_02 / icon_light_02), drawn
+ // through the pane's material colours rather than the layout's dummy image.
+ void selectIn(const char* family,Pose p,const char* caption=nullptr,unsigned icon=~0u){
+  const bool preload=transition&&transition->preload;
+  const UiAnimationClip* clip=nullptr;float frame=0;
+  if(!preload&&(!selectInClip(p,clip,frame)||std::strcmp(clip->name,"SelectIn")))return;
+  // The button's root (pause_w_null) keeps animating: a deselected button's
+  // burst finishes while the button shrinks back to its free pose.
+  Pose base=p;
+  if(!preload){
+   const auto root=panelFocus(Name(family,"_select"),p);
+   if(root.evaluated&&root.visible){base.x=p.x+root.tx*p.sx;base.y=p.y+root.ty*p.sy;base.sx=p.sx*root.sx;base.sy=p.sy*root.sy;}
+  }
+  const Name panes(family,"_selectin");
+  const bool character=!std::strcmp(family,"character"),cup=!std::strcmp(family,"cup"),vehicle=!std::strcmp(family,"vehicle");
+  for(const auto& g:UiGlows){
+   if(std::strcmp(g.group,"SelectIn")||std::strcmp(g.panel,family))continue;
+   const float alpha=preload?1.f:std::clamp(uiAnimationValue(*clip,g.pane,"RLVC",16,frame,0.f)/255.f,0.f,1.f);if(alpha<=0)continue;
+   const float sx=preload?1.f:uiAnimationValue(*clip,g.pane,"RLPA",6,frame,1.f),sy=preload?1.f:uiAnimationValue(*clip,g.pane,"RLPA",7,frame,1.f);
+   Pose pose=base;pose.x+=g.pivotX*base.sx*(1-sx);pose.y-=g.pivotY*base.sy*(1-sy);pose.sx*=sx;pose.sy*=sy;
+   const auto first=out.size();
+   if((character||cup)&&*g.key){
+    if(icon==~0u)continue;
+    char key[32];
+    if(character)std::snprintf(key,sizeof key,"driver_%u",icon);
+    else std::snprintf(key,sizeof key,icon<8?"cup_%u":"battle_cup_%u",icon<8?icon:icon-8);
+    inPane(key,panes.c_str(),g.pane,pose);
+    for(auto at=first;at<out.size();++at){out[at].material=true;out[at].color0=g.materialColors[0];out[at].color1=g.materialColors[1];}
+   }else if(vehicle&&*g.key){
+    if(icon>=12)continue;
+    char key[64];std::snprintf(key,sizeof key,"vehicle_%c%u","sml"[UiCharacters[std::min(state.selection.driver,25u)].weight],icon);
+    inPane(key,panes.c_str(),g.pane,pose);
+    if(out.size()>first){auto& q=out.back();q.vehicleIcon=icon;q.vehicleColor0=g.materialColors[0];q.vehicleColor1=g.materialColors[1];}
+   }else if(!*g.key){if(caption)text(caption,panes.c_str(),pose,0xffffffff,g.pane);}
+   else panel(g.key,pose);
+   for(auto at=first;at<out.size();++at){out[at].alpha*=alpha;out[at].additive=g.blend!=0&&!out[at].material;}
+  }
+ }
  void button(const char* base,unsigned slot,Pose p,const char* caption=nullptr){
   p.focusSlot=slot;
   auto key=buttonState(base,slot);panel(key.c_str(),p);
-  if(caption){text(caption,key.c_str(),p);if(state.cursor==slot)glow(base,p,caption);}
+  if(caption){text(caption,key.c_str(),p);if(state.cursor==slot)glow(base,p,caption);selectIn(base,p,caption);}
  }
  void chrome(const char* title,const char* description=""){
   panel("header",motionOnly("MenuObiTop","MenuObiTop"));panel(*description?"footer_help":"footer",control("MenuObiBottom","MenuObiBottom"));
@@ -359,6 +541,46 @@ public:
   const char* cls=Progress::unlockableClass(i);
   panel("button_select",{0,-12,1.1f,cls?2.6f:2.f});label("Unlocked!",0,cls?-62:-52,400,37,0xffe040ffu);
   label(Progress::unlockableName(i),0,cls?-22:-12,400,37);if(cls)label(cls,0,18,400,37);
+ }
+ // A message window (common_w017_message) over a dimmed page, its text one baked line at a time.
+ void message(const char* text){
+  panel("confirm_back",control("RaceConfirmBack","BlackBack"));
+  const Pose p=control("MessageWindow","MessageWindow");panel("message",p);
+  const auto* r=pane("message","text");if(!r)return;
+  // Blank lines (paragraph breaks) are skipped, as the lines were baked without them.
+  unsigned n=0;for(const char* at=text;*at;++at)n+=(at==text||at[-1]=='\n')&&*at!='\n';
+  if(!n)return;
+  const float lineH=std::min(r->fontH>0?r->fontH*1.15f:r->h,r->h/float(n));
+  unsigned i=0;
+  for(const char* at=text;*at;){const char* end=std::strchr(at,'\n');const size_t len=end?size_t(end-at):std::strlen(at);
+   if(len){char line[160];std::snprintf(line,sizeof line,"%.*s",int(len),at);
+    UiPaneInfo one=*r;one.h=lineH;one.y=r->y+(r->h-lineH*float(n))*.5f+lineH*float(i++);one.textPosition=4;
+    textSprite(lookup().find(line,true,r->font,r->textStyle),one,p);}
+   at=end?end+1:at+len;}
+ }
+ // A license card (common_w076): its name, the cup icons ("?" until unlocked) and
+ // the trophy grid; selected, the card's select state.
+ void licenseCard(const char* family,Pose p,const License& l,bool selected){
+  const Name base(family,selected?"_select":"_free");panel(base,p);
+  if(!l.used){text("NEW",base,p,0xffffffff,"new");return;}
+  chars(l.name,base,p,0xffffffff,"player");
+  static constexpr const char* cups[]={"n_0_kinoko","n_1_flower","n_2_star","n_3_special","r_0_koura","r_1_banana","r_2_konoha","r_3_thunder"};
+  static constexpr const char* hatena[]={"","","n_2_hatena","n_3_hatena","","","r_2_hatena","r_3_hatena"};
+  static constexpr const char* rows[]={"cc50","cc100","cc150","cc_mirror"};
+  static constexpr const char* classes[]={"class_50","class_100","class_150","mirror"};
+  static constexpr const char* labels[]={"50cc","100cc","150cc","Mirror"};
+  static constexpr const char* colors[]={"","license_bronze_color","license_silver_color","license_gold_color"};
+  auto won=[&](unsigned cup){for(unsigned k=0;k<4;++k)if(l.trophy[k][cup])return true;return false;};
+  bool mirror=progress().unlockAll;
+  if(!mirror){mirror=true;for(unsigned c=0;c<8;++c)mirror&=l.trophy[2][c]==3;}
+  for(unsigned c=0;c<8;++c){
+   // Star and Special (Leaf and Lightning) open once the cup before them is won.
+   const bool open=progress().unlockAll||c%4<2||won(c)||won(c-1);
+   char key[40];std::snprintf(key,sizeof key,"license_%s",open?cups[c]:hatena[c]);inPane(key,base,open?cups[c]:hatena[c],p,1,true);
+   for(unsigned k=0;k<4;++k){if(!l.trophy[k][c]||(k==3&&!mirror))continue;
+    char cell[24];std::snprintf(cell,sizeof cell,"%s_%02u",rows[k],c);inPane(colors[std::min<unsigned>(l.trophy[k][c],3)],base,cell,p,1,true);}
+  }
+  for(unsigned k=0;k<4;++k)if(k<3||mirror)text(labels[k],base,p,0xffffffff,classes[k]);
  }
  void notice(){if(!state.unavailable)return;panel("button_select",{0,-12,.95f,1.35f});label(state.locked?"Locked":"Not available",0,-20,400,37);}
  void dim(std::size_t from){for(auto i=from;i<out.size();++i)out[i].tint=LockedTint;}
@@ -392,7 +614,23 @@ static void composeMenuImpl(const MenuState& s,const UiRaceView& race,std::vecto
  const char* modes[]={"Grand Prix","Time Trials","VS","Battle"};
  // The first quad is always the background, allowing the original 3D menu
  // scene to be inserted between it and the authored controls.
- if(s.page!=UiPage::Confirm)c.panel(s.page==UiPage::Title||s.page==UiPage::Intro?"title_scene":s.page==UiPage::MainMenu||s.page==UiPage::License?"title_blur_scene":"background");
+ // The race sections (Section_addPages PAL 0x8062C3A4: 0x1E GP, 0x1F TT, 0x20 VS,
+ // 0x28 Battle) have no MenuBG page: the pause pages and page 0x2C lie over the
+ // frozen race (main.cpp), so they compose no background either.
+ const bool raceSection=s.page==UiPage::Pause||s.page==UiPage::QuitConfirm;
+ if(s.page!=UiPage::Confirm&&!raceSection)c.panel(s.page==UiPage::Title||s.page==UiPage::Intro?"title_scene":s.page==UiPage::MainMenu||s.page==UiPage::License?"title_blur_scene":"background");
+ // MenuBG's eAFLoop (bg_Loop.brlan) translates line0's texture by T 0..100
+ // over 3500 frames; line0 repeats every 8 layout units (v 0..160 across its
+ // 1280-unit height), so the stripes rise 8*T units. The cooked panel is that
+ // pattern at T=0: slide the sampled window by the same amount, within the
+ // 14.25-unit rows the screen crop leaves above and below.
+ if(s.page!=UiPage::Confirm&&!q.empty()&&q.front().sprite==uiFindSpriteKey("background")&&!preload)if(const auto* clip=uiFindAnimationClip("MenuBG","eAFLoop","Loop");clip&&clip->duration>0){
+  constexpr float Period=8.f,Height=456.f;
+  const float frame=std::fmod(float(s.sectionAge)*clip->rate,clip->duration);
+  const float shift=std::fmod(Period*uiAnimationValue(*clip,"line0","RLTS",1,frame,0.f),Period)/Height;
+  auto& bg=q.front();
+  if(bg.v1+shift<=1.f){bg.v0+=shift;bg.v1+=shift;}
+ }
  switch(s.page){
  case UiPage::Intro:
   if(!q.empty())if(const unsigned i=uiFindMovieRegion("intro_movie");i<std::size(UiMovieRegions))q.back().movie=i;
@@ -412,25 +650,27 @@ static void composeMenuImpl(const MenuState& s,const UiRaceView& race,std::vecto
   }break;
  case UiPage::License:{
   c.chrome("Select License");
-  for(unsigned i=0;i<4;++i){char name[32];std::snprintf(name,sizeof name,"License%u",i);Pose p=control(i<2?"LicenseSelectT":"LicenseSelectB",name,i);auto base=c.buttonState(i<2?"license_top_empty":"license_bottom_empty",i);c.panel(base.c_str(),p);
-   // A used slot shows its license's name, set a character at a time.
-   if(const auto& l=progress().license[i];l.used)c.chars(l.name,base.c_str(),p,0xffffffff,"new");else c.text("NEW",base.c_str(),p,0xffffffff,"new");if(i==s.cursor)c.glow(i<2?"license_top_empty":"license_bottom_empty",p);
+  for(unsigned i=0;i<4;++i){char name[32];std::snprintf(name,sizeof name,"License%u",i);Pose p=control(i<2?"LicenseSelectT":"LicenseSelectB",name,i);c.licenseCard(i<2?"license_top_empty":"license_bottom_empty",p,progress().license[i],i==s.cursor);if(i==s.cursor)c.glow(i<2?"license_top_empty":"license_bottom_empty",p);c.selectIn(i<2?"license_top_empty":"license_bottom_empty",p);
   }
-  Pose option=control("LicenseSelectS","Option");c.panel("option_free",option);c.text("Settings","option_free",option);
+  c.button("option",4,control("LicenseSelectS","Option",4),"Options");
   break;
  }
  case UiPage::MainMenu:{
   const char* titles[]={"Single Player","Multiplayer","Nintendo WFC","Mario Kart Channel"};
   const char* groups[]={"TopMenuSingleWaku","TopMenuMultiWaku","TopMenuWifiWaku","TopMenuChannelWaku"};
-  for(unsigned i=0;i<4;++i){Pose p=control(groups[i],groups[i],UiFocusMainParentBase+i);c.panel("main_free",p);// common_w069: text_sha, text (alpha 128), text_light, then text_00, the opaque title drawn last. The frames never select (uiFocus selected()), so text_light stays in its Free pose.
-   for(const char* field:{"text_sha","text","text_light","text_00"})c.text(titles[i],"main",p,0xffffffff,field);
-   if(i==0){auto b=child(p,control("TopMenuSingle","ButtonSingle",0));auto base=c.buttonState("main_button",0);c.movieButton(base.c_str(),b);c.movie("main_movie_",0,base.c_str(),"black_base",b);c.movieOverlay(base.c_str(),b);c.text("1\nPlayer",base.c_str(),b);if(s.cursor==0)c.glow("main_button",b,"1\nPlayer");}
-   if(i==1||i==2){unsigned n=i==1?3:2;for(unsigned k=0;k<n;++k){char v[48];std::snprintf(v,sizeof v,i==1?"ButtonMulti%uP":"ButtonWifi%uP",k+(i==1?2:1));Pose b=child(p,control(i==1?"TopMenuMulti":"TopMenuWifi",v,i==1?1+k:4+k));const auto slot=i==1?1+k:4+k;auto base=c.buttonState(i==1?"main_multi":"main_wifi",slot);c.movieButton(base.c_str(),b);c.movie("main_movie_",slot,base.c_str(),"black_base",b);c.movieOverlay(base.c_str(),b);char caption[20];const unsigned players=k+(i==1?2:1);std::snprintf(caption,sizeof caption,"%u\n%s",players,players==1?"Player":"Players");c.text(caption,base.c_str(),b);if(s.cursor==slot)c.glow(i==1?"main_multi":"main_wifi",b,caption);}}
+  for(unsigned i=0;i<4;++i){Pose p=control(groups[i],groups[i],UiFocusMainParentBase+i);
+   // common_w069 submits text_sha, text (alpha 128) and text_light inside
+   // con_window_null, before Null_00's gloss (Picture_02/01, the waku_light
+   // tail at alpha 128) and text_00, the opaque title drawn last.
+   c.panel("main_free",p,1,[&]{for(const char* field:{"text_sha","text","text_light"})c.text(titles[i],"main",p,0xffffffff,field);});
+   c.text(titles[i],"main",p,0xffffffff,"text_00");
+   if(i==0){auto b=child(p,control("TopMenuSingle","ButtonSingle",0));auto base=c.buttonState("main_button",0);c.movieButton(base.c_str(),b);c.movie("main_movie_",0,base.c_str(),"black_base",b);c.movieOverlay(base.c_str(),b);c.text("1\nPlayer",base.c_str(),b);if(s.cursor==0)c.glow("main_button",b,"1\nPlayer");c.selectIn("main_button",b,"1\nPlayer");}
+   if(i==1||i==2){unsigned n=i==1?3:2;for(unsigned k=0;k<n;++k){char v[48];std::snprintf(v,sizeof v,i==1?"ButtonMulti%uP":"ButtonWifi%uP",k+(i==1?2:1));Pose b=child(p,control(i==1?"TopMenuMulti":"TopMenuWifi",v,i==1?1+k:4+k));const auto slot=i==1?1+k:4+k;auto base=c.buttonState(i==1?"main_multi":"main_wifi",slot);c.movieButton(base.c_str(),b);c.movie("main_movie_",slot,base.c_str(),"black_base",b);c.movieOverlay(base.c_str(),b);char caption[20];const unsigned players=k+(i==1?2:1);std::snprintf(caption,sizeof caption,"%u\n%s",players,players==1?"Player":"Players");c.text(caption,base.c_str(),b);if(s.cursor==slot)c.glow(i==1?"main_multi":"main_wifi",b,caption);c.selectIn(i==1?"main_multi":"main_wifi",b,caption);}}
    if(i==3){Pose b=child(p,control("TopMenuChannel","ButtonChannel",6));auto base=c.buttonState("main_button",6);c.movieButton(base.c_str(),b);c.movie("main_movie_",6,base.c_str(),"black_base",b);c.movieOverlay(base.c_str(),b);}
   }
   c.chrome("Main Menu",s.cursor==0?UiHelpMain[0]:s.cursor<4?UiHelpMainMulti[s.cursor-1]:s.cursor<6?UiHelpWfc[s.cursor-4]:UiHelpMain[3]);
   // License Settings overlaps the top banner and draws above it.
-  {Pose edit=control("FileAdmin","ButtonFileAdmin");c.panel("license_edit_free",edit);c.text("License Settings","license_edit_free",edit);}break;
+  c.button("license_edit",7,control("FileAdmin","ButtonFileAdmin",7),"License Settings");break;
  }
  case UiPage::Mode:{
   const char* variants[]={"ButtonGP","ButtonTA","ButtonVS","ButtonBT"};
@@ -440,7 +680,7 @@ static void composeMenuImpl(const MenuState& s,const UiRaceView& race,std::vecto
    const char* panes[]={"black_base","black_base_00","black_base_01","black_base_02"};
    for(unsigned j=0;j<4;++j)c.movie("mode_movie_",std::min(s.cursor,3u),base.c_str(),panes[j],p,1,j*.25f,i*.25f,(j+1)*.25f,(i+1)*.25f);
    c.movieOverlay(base.c_str(),p);
-   c.text(modes[i],base.c_str(),p,0xffffffff);if(s.cursor==i)c.glow("mode",p,modes[i]);}
+   c.text(modes[i],base.c_str(),p,0xffffffff);if(s.cursor==i)c.glow("mode",p,modes[i]);c.selectIn("mode",p,modes[i]);}
   c.chrome("Single Player",UiHelpMode[std::min(s.cursor,3u)]);break;
  }
  case UiPage::EngineClass:{
@@ -448,11 +688,11 @@ static void composeMenuImpl(const MenuState& s,const UiRaceView& race,std::vecto
   const char* names[]={"50cc","100cc","150cc","Mirror"};const char* rrNames[]={"100cc","150cc","200cc","Mirror"};const char* variants[]={"Button50cc","Button100cc","Button150cc","ButtonMirror"};
   for(unsigned i=0;i<4;++i){Pose p=control("ClassSelect2",variants[i],i);auto base=c.buttonState("class",i);const unsigned art=MenuState::retailClass(i);
    c.movieButton(base.c_str(),p);c.movie("class_movie_",s.engineClassMovie(i),base.c_str(),"black_base",p);c.movieOverlay(base.c_str(),p);
-   {const auto first=q.size();c.icon("class_",art,base.c_str(),"kinoko_set_p",p);if(art==3&&!progress().mirror())c.dim(first);}
+   {const auto first=q.size();c.icon("class_",art,base.c_str(),"kinoko_set_p",p,1,c.materialTint(p,"class","kinoko_set_p",s.cursor==i));if(art==3&&!progress().mirror())c.dim(first);}
    char caption[64];
    if(RetroRewind)std::snprintf(caption,sizeof caption,"%s\nKarts and Bikes",rrNames[i]);
    else std::snprintf(caption,sizeof caption,"%s\n%s",names[i],i==0&&!s.selection.mixedEngineTypes?"Karts Only":i==1&&!s.selection.mixedEngineTypes?"Bikes Only":"Karts and Bikes");
-   c.text(caption,base.c_str(),p);if(s.cursor==i)c.glow("class",p,caption);}
+   c.text(caption,base.c_str(),p);if(s.cursor==i)c.glow("class",p,caption);c.selectIn("class",p,caption);}
   if(RetroRewind){c.chrome("Engine Classes",UiHelpEngineClassesAllKartBike[MenuState::retailClass(std::min(s.cursor,3u))]);break;}
   {Pose toggle=control("ClassChange","ClassChange");char key[48];
    for(unsigned blink=0;blink<(preload?2u:1u);++blink){const unsigned frame=((s.age/30)+blink)%2;
@@ -462,7 +702,13 @@ static void composeMenuImpl(const MenuState& s,const UiRaceView& race,std::vecto
  }
  case UiPage::Character:{
   Pose parent=control("CharacterSelectNULL","CharacterSelectNULL");constexpr unsigned within[]={0,1,4,6,2,3,5,7};
-  for(unsigned i=0;i<s.count();++i){char group[48];std::snprintf(group,sizeof group,"CharacterSelect4_%u",i<24?i/8:3);Pose p=child(parent,numbered(group,i<24?within[i%8]:i-24));p.focusSlot=i;c.button("character",i,p);{const auto first=q.size();c.icon("driver_",s.characterDriver(i),c.buttonState("character",i).c_str(),"chara",p);if(!progress().character(s.characterDriver(i)))c.dim(first);}if(s.cursor==i)c.glow("character",p,nullptr,s.characterDriver(i));}
+  for(unsigned i=0;i<s.count();++i){char group[48];std::snprintf(group,sizeof group,"CharacterSelect4_%u",i<24?i/8:3);Pose p=child(parent,numbered(group,i<24?within[i%8]:i-24));p.focusSlot=i;c.button("character",i,p);
+   // ButtonDriver replaces every chara* picture with the driver image:
+   // chara_shadow (material C1 black), chara, chara_c_down (C1 200 grey,
+   // alpha 50 while free) - the same submission order as the machines.
+   {const auto first=q.size();const auto base=c.buttonState("character",i);const unsigned d=s.characterDriver(i);
+    c.icon("driver_",d,base.c_str(),"chara_shadow",p,1,0x000000ffu);c.icon("driver_",d,base.c_str(),"chara",p);c.icon("driver_",d,base.c_str(),"chara_c_down",p,1,0xc8c8c8ffu);
+    if(!progress().character(d))c.dim(first);}if(s.cursor==i)c.glow("character",p,nullptr,s.characterDriver(i));c.selectIn("character",p,nullptr,s.characterDriver(i));}
   Pose name=control("CharacterSelectName","CharacterSelectName");c.panel("character_name",name);c.text(UiCharacters[s.characterDriver(s.cursor)].name,"character_name",name,0xffffffff,"mii_name");
   // Retro Rewind skins: the chosen one under the name (tools/cook_menu_ui.py bakes the labels).
   const unsigned driverSkins=s.characterDriver(s.cursor)<GarageSkinCounts.size()?GarageSkinCounts[s.characterDriver(s.cursor)]:0;
@@ -487,6 +733,7 @@ static void composeMenuImpl(const MenuState& s,const UiRaceView& race,std::vecto
     }
    }
    if(s.cursor==i)c.glow("vehicle",p,nullptr,s.vehicleChoice(i));
+   c.selectIn("vehicle",p,nullptr,s.vehicleChoice(i));
   }
   Pose name=control("MachineSelectName","MachineSelectName");c.panel("vehicle_name",name);c.text(UiVehicleNames[weight][s.vehicleChoice(s.cursor)],"vehicle_name",name,0xffffffff,"mii_name");
   const char* stats[]={"Speed","Weight","Acceleration","Handling","Drift","Off-Road","Mini-Turbo"};const char* variants[]={"Speed","Weight","Accel","Handling","Drift","Dirt","Miniturbo"};
@@ -495,12 +742,14 @@ static void composeMenuImpl(const MenuState& s,const UiRaceView& race,std::vecto
  }
  case UiPage::Drift:
   // drift_select's lower clip is the automatic demo, the upper one manual.
-  for(unsigned i=0;i<2;++i){Pose p=control("PadEasy",i==0?"ButtonEasy":"ButtonNormal",i);auto base=c.buttonState("drift",i);c.movieButton(base.c_str(),p);c.movie("drift_movie_",1-i,base.c_str(),"black_base",p);c.movieOverlay(base.c_str(),p);c.text(i==0?"Automatic":"Manual",base.c_str(),p);if(s.cursor==i)c.glow("drift",p,i==0?"Automatic":"Manual");}c.chrome("Drift",UiHelpDrift[std::min(s.cursor,1u)]);
-  {Pose help=control("DriftHelp","DriftHelp");c.panel("drift_help_free",help);c.text("Help","drift_help_free",help);}break;
+  for(unsigned i=0;i<2;++i){Pose p=control("PadEasy",i==0?"ButtonEasy":"ButtonNormal",i);auto base=c.buttonState("drift",i);c.movieButton(base.c_str(),p);c.movie("drift_movie_",1-i,base.c_str(),"black_base",p);c.movieOverlay(base.c_str(),p);c.text(i==0?"Automatic":"Manual",base.c_str(),p);if(s.cursor==i)c.glow("drift",p,i==0?"Automatic":"Manual");c.selectIn("drift",p,i==0?"Automatic":"Manual");}c.chrome("Drift",UiHelpDrift[std::min(s.cursor,2u)]);
+  c.button("drift_help",2,control("DriftHelp","DriftHelp",2),"Help");break;
  case UiPage::VSMode:case UiPage::BattleMode:{
   bool battle=s.page==UiPage::BattleMode;const char* names[]={battle?"Balloon Battle":"Solo Race",battle?"Coin Runners":"Team Race"};
-  for(unsigned i=0;i<2;++i){Pose p=control(battle?"BattleSelect":"VSSelect",battle?(i?"ButtonCoin":"ButtonBalloon"):(i?"ButtonTeam":"ButtonIndividual"),i);auto base=c.buttonState(battle?"battle":"vs",i);c.movieButton(base.c_str(),p);c.movie(battle?"battle_mode_movie_":"vs_movie_",i,base.c_str(),"black_base",p);c.movieOverlay(base.c_str(),p);c.text(names[i],base.c_str(),p);if(s.cursor==i)c.glow(battle?"battle":"vs",p,names[i]);}
-  c.chrome(battle?"Battle":"VS");break;
+  for(unsigned i=0;i<2;++i){Pose p=control(battle?"BattleSelect":"VSSelect",battle?(i?"ButtonCoin":"ButtonBalloon"):(i?"ButtonTeam":"ButtonIndividual"),i);auto base=c.buttonState(battle?"battle":"vs",i);c.movieButton(base.c_str(),p);c.movie(battle?"battle_mode_movie_":"vs_movie_",i,base.c_str(),"black_base",p);c.movieOverlay(base.c_str(),p);c.text(names[i],base.c_str(),p);if(s.cursor==i)c.glow(battle?"battle":"vs",p,names[i]);c.selectIn(battle?"battle":"vs",p,names[i]);}
+  c.chrome(battle?"Battle":"VS",s.cursor==2?UiHelpRules[battle]:battle?UiHelpBattleMode[s.cursor]:UiHelpVSMode[s.cursor]);
+  // The corner Rules button (RuleSetting) opens the optional rules page; it overlaps the top bar.
+  c.button("drift_help",2,control("RuleSetting","ButtonRuleSetting",2),"Rules");break;
  }
  case UiPage::Rules:{
   // Pages::VSSettings / BattleSettings: RadioBase rows with their RadioOption
@@ -580,6 +829,8 @@ static void composeMenuImpl(const MenuState& s,const UiRaceView& race,std::vecto
    else if(i==selectedSlot||(pickCup&&uiFocusAnimation(s,i).changing())){
     c.text(cupName(cup),"cup_select",p);if(pickCup&&i==selectedSlot)c.glow("cup",p,cupName(cup),cup);
    }
+   // CupSelectCup is a PushButton: its SelectIn burst (PAL 805bdffc).
+   if(pickCup)c.selectIn("cup",p,CupNames[i],i);
   }
   if(pickCup){
    if(RetroRewind){
@@ -599,7 +850,7 @@ static void composeMenuImpl(const MenuState& s,const UiRaceView& race,std::vecto
     const char* base=s.cursor==i?"course_select":"course_free";const auto mark=q.size();c.movieButton(base,p);
     // Retro Rewind tracks show their course map (tools/cook_menu_ui.py map_N) in place of a movie.
     if(RetroRewind)c.icon("map_",ci,base,"black_base",p);else c.movie("course_preview_",ci,base,"black_base",p);
-    c.movieOverlay(base,p);c.text(courseName(ci),base,p);if(s.cursor==i)c.glow("course",p,courseName(ci));
+    c.movieOverlay(base,p);c.text(courseName(ci),base,p);if(s.cursor==i)c.glow("course",p,courseName(ci));c.selectIn("course",p,courseName(ci));
     if(!Courses[ci].supported)c.dim(mark);
    }
   }
@@ -616,6 +867,7 @@ static void composeMenuImpl(const MenuState& s,const UiRaceView& race,std::vecto
    if(i==cup||(pick&&uiFocusAnimation(s,i).changing())){
     c.text(names[i],"cup_select",p);if(pick&&i==cup)c.glow("cup",p,names[i],BattleGlow+i);
    }
+   if(pick)c.selectIn("cup",p,names[i],8+i);
   }
   if(pick){
    const Pose movie=child(cups,control("CourseSelectMovie","BattleCupMovie"));
@@ -635,11 +887,13 @@ static void composeMenuImpl(const MenuState& s,const UiRaceView& race,std::vecto
     c.movieButton(base,p);c.movie("battle_preview_",cup*5+std::min(s.cursor,4u),base,"black_base",p,1,0,float(i)/5,1,float(i+1)/5);
     c.movieOverlay(base,p);c.text(UiBattleStageNames[cup*5+i],base,p);
     if(s.cursor==i)c.glow("course",p,UiBattleStageNames[cup*5+i]);
+    c.selectIn("course",p,UiBattleStageNames[cup*5+i]);
    }
   }
   c.chrome(pick?"Cups":"Stages");break;
  }
  case UiPage::Ghost:{
+
   const char* names[]={"Race This Ghost","Watch the Replay","Solo Time Trials"};
   const char* variants[]={"Run","Watch","Alone"};
   // Without a ghost the page is Solo alone: no card, no ghost buttons.
@@ -651,13 +905,21 @@ static void composeMenuImpl(const MenuState& s,const UiRaceView& race,std::vecto
   {const uint32_t ms=s.ghostMilliseconds;char time[16];std::snprintf(time,sizeof time,"%u'%02u\"%03u",unsigned(ms/60000),unsigned(ms/1000%60),unsigned(ms%1000));
    c.chars(time,"ghost_info",info,0xffffffff,"time");}
   const unsigned driver=std::min(s.ghostDriver,25u),weight=UiCharacters[driver].weight;
-  c.text(UiCharacters[driver].name,"ghost_info",info,0xffffffff,"player");
-  c.icon("driver_",driver,"ghost_info","chara",info,1,true);
+  // A staff ghost's card names its Mii (the RKG's); the license's own names the character.
+  const unsigned staff=std::min(s.selection.course,31u)*2+(s.ghostSource==2?1:0);
+  c.text(s.ghostSource&&*StaffGhostInfos[staff].name?StaffGhostInfos[staff].name:UiCharacters[driver].name,"ghost_info",info,0xffffffff,"player");
+  c.icon("driver_",driver,"ghost_info","chara",info,1,0xffffffff,true);
   {const unsigned vehicle=std::min(s.ghostVehicle,11u);char key[32];std::snprintf(key,sizeof key,"vehicle_%c%u","sml"[weight],vehicle);
    const auto first=q.size();c.inPane(key,"ghost_info","machine",info,1,true);
    if(q.size()>first){auto& icon=q.back();icon.vehicleIcon=vehicle;icon.vehicleColor0=0;icon.vehicleColor1=0xffffffffu;}}
   for(unsigned i=0;i<3;++i)c.button("ghost",i,control("TimeAttackGhostList",variants[i]),names[i]);
-  c.chrome("Ghosts");break;
+  // More than one ghost: page arrows and "1/2" (TimeAttackGhostListArrow*, PageNum).
+  if(s.ghostCount>1){
+   c.panel("ghost_arrow_left_free",control("TimeAttackGhostListArrowLeft","ButtonArrowLeft"));c.panel("ghost_arrow_right_free",control("TimeAttackGhostListArrowRight","ButtonArrowRight"));
+   const Pose page=control("TimeAttackGhostListPageNum","TimeAttackGhostListPageNum");c.panel("ghost_page",page);
+   char number[8];std::snprintf(number,sizeof number,"%u/%u",s.ghostPage+1,s.ghostCount);c.chars(number,"ghost_page",page,0xffffffff,"close_number");
+  }
+  c.chrome("Ghosts",s.ghostCount>1?"Left / Right: change the ghost.":"");break;
  }
  case UiPage::Confirm:{
   c.panel("confirm_back",control("RaceConfirmBack","BlackBack"));
@@ -667,22 +929,107 @@ static void composeMenuImpl(const MenuState& s,const UiRaceView& race,std::vecto
   Pose back=control("Back","ButtonBackMenuEndConfirm");c.panel("back_free",back);c.inPane("button_back","back_free","text",back);
   c.button("confirm",0,control("MenuEndConfirm","ButtonOK"),"OK");break;
  }
+ // RaceMenuPage_onInit (PAL 0x80858D60) creates only the list's PushButtons,
+ // each at its own variant's 16:9 pose (button/ctrl/PauseMenu*.brctr), over
+ // the frozen race: no obi, title or Back button. Captions are BMG 0x3EB-0x3EF;
+ // the menu cook has no "Continue Game" / "Quit Game" (0x3EB/0x3EC), so those
+ // two show the cooked "Continue" / "Quit" until it does. The PadInfo
+ // controller diagram (sections 0x1E/0x20/0x24/0x28) is not cooked.
  case UiPage::Pause:{
-  c.chrome("Pause");const char* variants[]={"ButtonContinue","ButtonRestart","ButtonQuit"};
-  // The native port has three actions. Retain that layout, while using the
-  // original race controller's delays and shared common_w004 animations.
-  for(unsigned i=0;i<3;++i){auto p=control(uiPauseMenuControl(s),variants[i]);p.y=90.f-float(i)*85;
-   c.button("button",i,p,i==0?"Continue":i==1?"Restart":"Quit");}break;
+  // Retail's pause has no title bar: the controller picture above the buttons,
+  // each label naming what that button does with the current controls.
+  // Only when the buttons leave room above them (Time Trials' five reach the top).
+  const auto pauseButtons=s.pauseMenu();float highest=-1e9f;
+  for(unsigned i=0;i<pauseButtons.count;++i){static constexpr const char* names[]={"ButtonContinue","ButtonRestart","ButtonChangeCourse","ButtonChangeCharacter","ButtonQuit"};
+   highest=std::max(highest,control(uiPauseMenuControl(s),names[unsigned(pauseButtons.buttons[i])]).y);}
+  const auto* picture=uiFindPanel("vita_controls");
+  if(picture&&-(highest+40.f)>=picture->y+picture->h){
+  c.panel("vita_controls");
+  for(const auto& bar:UiControlBars){
+   const char* label=!std::strcmp(bar.button,"Stick")?"Steer":!std::strcmp(bar.button,"D-pad")?"Trick":!std::strcmp(bar.button,"START")?"Pause":nullptr;
+   for(unsigned b=0;!label&&b<ControlButtonCount;++b)if(!std::strcmp(bar.button,ControlButtonNames[b]))
+    for(unsigned a=0;a<ControlActionCount;++a)if(unsigned(controls().active()[a])==b)label=ControlActionNames[a];
+   if(label)c.label(label,bar.x+bar.w/2,bar.y+1.5f,bar.w-8,bar.h-3);
+  }
+  }
+  // The mode's PauseMenu*.brctr places its buttons; the cooked positions are retail's.
+  static constexpr const char* variants[]={"ButtonContinue","ButtonRestart","ButtonChangeCourse","ButtonChangeCharacter","ButtonQuit"};
+  static constexpr const char* captions[]={"Continue","Restart","Change Course","Change Character","Quit"};
+  const auto menu=s.pauseMenu();
+  for(unsigned i=0;i<menu.count;++i){const unsigned b=unsigned(menu.buttons[i]);c.button("button",i,control(uiPauseMenuControl(s),variants[b]),captions[b]);}
+  break;
  }
- case UiPage::QuitConfirm:{
-  c.chrome("Quit this race?");auto yes=control("YesNoButton","Option0"),no=control("YesNoButton","Option1");
+ case UiPage::LicenseSettings:{
+  // Pages::LicenseSettings: Records, Change Mii, Erase License, with the license card beside them.
+  const char* names[]={"Records","Change Mii","Erase License"};const char* variants[]={"ButtonCreateFile","ButtonChangeMii","ButtonDeleteFile"};
+  for(unsigned i=0;i<3;++i){auto p=control("FileAdminTop",variants[i],i);p.x=-130;p.sx*=.7f;p.sy*=.85f;c.button("button",i,p,names[i]);}
+  const unsigned slot=std::min(s.selection.license,3u);Pose card=control("LicenseSelectT","License0");card.x=140;card.y=0;
+  c.licenseCard("license_top_empty",card,progress().license[slot],false);
+  c.chrome("License Settings",s.cursor==0?"View this license's records.":s.cursor==1?"Change this license's Mii.":"Erase this license.");
+  break;
+ }
+ case UiPage::Records:{
+  // Time Trial bests, a cup at a time: each course's row and its time.
+  const auto& l=progress().license[std::min(s.selection.license,3u)];const unsigned cup=std::min(s.recordsCup,RaceCupCount-1);
+  {Pose head=control("VSSettingUpDownBase","UpDownRaceNum");head.y=150;c.panel("rule_row_select",head);c.text(cupName(cup),"rule_row_select",head);}
+  for(unsigned i=0;i<4;++i){
+   const unsigned course=cup*4+i;Pose row=control("VSSettingUpDownBase","UpDownRaceNum");row.y=95.f-55.f*float(i);
+   c.panel("rule_row_free",row);c.text(courseName(course),"rule_row_free",row);
+   const Pose value=child(row,control("VSSettingUpDownValue","Value"));c.panel("rule_value_free",value);
+   char time[16];const uint32_t ms=course<l.bestTimes.size()?l.bestTimes[course]:0;
+   if(ms)std::snprintf(time,sizeof time,"%u:%02u.%03u",unsigned(ms/60000),unsigned(ms/1000%60),unsigned(ms%1000));else std::snprintf(time,sizeof time,"-:--.---");
+   c.chars(time,"rule_value_text",child(value,control("VSSettingUpDownText","Text")));
+  }
+  c.chrome("Records","Left / Right: change the cup.");break;
+ }
+ case UiPage::EraseLicense:{
+  c.chrome("Erase this license?");auto yes=control("YesNoButton","Option0",0),no=control("YesNoButton","Option1",1);
   yes.x=no.x=0;yes.y=50;no.y=-55;c.button("button",0,yes,"Yes");c.button("button",1,no,"No");break;
+ }
+ case UiPage::Options:{
+  // Two of the shared OK-style buttons, placed where the Yes/No pair sits.
+  c.chrome("Options",s.cursor==0?"Change the race controls.":"Change the game settings.");
+  const char* names[]={"Controls","Settings"};
+  for(unsigned i=0;i<2;++i){auto p=control("YesNoButton",i?"Option1":"Option0",i);p.y=60.f-float(i)*95;c.button("button",i,p,names[i]);}
+  break;
+ }
+ case UiPage::Controls:case UiPage::GameSettings:{
+  // Rules-page rows, each an UpDown value (left/right steps it), then OK.
+  const bool controlsPage=s.page==UiPage::Controls;const unsigned rows=s.count()-1;
+  const float top=controlsPage?150.f:120.f,step=controlsPage?31.f:44.f,scale=controlsPage?.8f:1.f;
+  for(unsigned row=0;row<rows;++row){
+   Pose updown=control("VSSettingUpDownBase","UpDownRaceNum");updown.y=top-step*float(row);updown.sy*=scale;
+   const bool focused=row==s.cursor;const char* rowBase=focused?"rule_row_select":"rule_row_free";
+   c.panel(rowBase,updown);c.text(s.settingLabel(row),rowBase,updown);
+   const Pose value=child(updown,control("VSSettingUpDownValue","Value"));
+   c.panel(focused?"rule_value_select":"rule_value_free",value);
+   c.panel(focused?"rule_left_select":"rule_left_free",child(updown,control("VSSettingUpDownButtonL","LeftButton")));
+   c.panel(focused?"rule_right_select":"rule_right_free",child(updown,control("VSSettingUpDownButtonR","RightButton")));
+   c.text(s.settingValue(row),"rule_value_text",child(value,control("VSSettingUpDownText","Text")));
+  }
+  c.button("button",rows,control("VSSetting","ButtonOK",rows),"OK");
+  c.chrome(controlsPage?"Controls":"Settings",controlsPage?"Choose an action, then press its button.":"Left / Right: change the setting.");
+  break;
+ }
+ // Page 0x2C (ctor PAL 0x806250F0): AfterMenuEndConfirm's ButtonConfirmContinue
+ // and ButtonConfirmQuit (ids 23/24, BMG 0x3E9 "Continue" / 0x3EA "Quit") under
+ // RaceMessageWindow with BMG 0x44D. That control is not in the menu cook: its
+ // 16:9 poses and start frames are the brctr's, and its common_w004_menu
+ // animations are the pause controls' (the same nine brlan files). The message
+ // window (game_image race_message_half) and BMG 0x44D are not cooked.
+ case UiPage::QuitConfirm:{
+  constexpr struct {float y,delay;const char* caption;} buttons[2]={{-150.f,4.f,"Continue"},{-75.f,2.f,"Quit"}};
+  for(unsigned i=0;i<2;++i){auto p=control(uiPauseMenuControl(s),"ButtonContinue");p.x=0;p.y=buttons[i].y;p.delay=buttons[i].delay;
+   c.button("button",i,p,buttons[i].caption);}
+  break;
  }
  case UiPage::Error:{c.chrome("Race unavailable");auto p=control("ConfirmOK","OK");p.x=p.y=0;
   c.button("button",0,p,"Choose another course");break;}
  default:break;
  }
  c.notice();c.unlocked();
+ if(s.messageOpen&&s.page==UiPage::Drift)c.message(UiMessageDriftHelp);
+ if(s.binding>=0&&s.page==UiPage::Controls){char text[96];std::snprintf(text,sizeof text,"%s\n%s",ControlActionNames[s.binding],UiMessageBindControl);c.message(text);}
 }
 void composeMenu(const MenuState& s,const UiRaceView& race,std::vector<UiQuad>& q){composeMenuImpl(s,race,q,nullptr);}
 void composeMenu(const MenuState& s,const UiRaceView& race,std::vector<UiQuad>& q,const UiTransitionView& t){composeMenuImpl(s,race,q,&t);}

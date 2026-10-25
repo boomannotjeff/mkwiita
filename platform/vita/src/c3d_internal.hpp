@@ -22,12 +22,13 @@ struct FragmentKey {
 	uint8_t units;         // bit n: texture unit n has a texture bound
 	uint8_t projection0;   // unit 0 samples projectively (GPU_TEX_PROJECTION)
 	uint8_t vertexProgram;
+	uint8_t constantAlpha;  // CONSTANT_ALPHA blending: the output alpha is blendAlpha
 };
 
 struct Program {
 	GLuint gl = 0;
-	GLint vsConst = -1, vsBones = -1, vsFlags = -1, vsFlags2 = -1;
-	GLint konst = -1, bufColor = -1, alphaRef = -1;
+	GLint vsConst = -1, vsBones = -1, vsFlags = -1, vsFlags2 = -1, vsProj = -1, vsFlags3 = -1;
+	GLint konst = -1, bufColor = -1, alphaRef = -1, blendAlpha = -1;
 	uint32_t uploadedConst = ~0u, uploadedBones = ~0u;
 	// The fragment constants last uploaded (PICA colours and alpha reference).
 	uint32_t konstUploaded[6] = {}, bufUploaded = 0;

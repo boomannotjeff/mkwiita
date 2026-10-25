@@ -94,7 +94,6 @@ def main():
     p.add_argument('--assets-only', action='store_true',
                    help='only build the game files, for a downloaded VPK (no VitaSDK needed)')
     p.add_argument('--release', action='store_true', help='no test hooks or runtime log')
-    p.add_argument('--mipmaps', action='store_true', help='experimental texture mipmaps (see tools/vita/build_assets.py)')
     p.add_argument('--force-cook', action='store_true', help='cook every asset again')
     p.add_argument('--rr', type=Path, help='Retro Rewind folder (RetroRewind6): builds the separate Retro Rewind edition')
     p.add_argument('--rr-cups', default='all', help='Retro Rewind cups to cook: all (default), or e.g. RT:0 or RT:0-3,CT:1')
@@ -112,7 +111,7 @@ def main():
     run([sys.executable, 'tools/bootstrap.py'])
     if not a.skip_assets:
         run([sys.executable, 'tools/vita/build_assets.py', *([a.disc] if a.disc else []),
-             *(['--mipmaps'] if a.mipmaps else []), *(['--force-cook'] if a.force_cook else []),
+             *(['--force-cook'] if a.force_cook else []),
              *(['--rr', a.rr, '--rr-cups', a.rr_cups, '--rr-skins', a.rr_skins] if a.rr else [])])
     build = ROOT / 'build/vita'
     if a.assets_only:

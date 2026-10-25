@@ -29,8 +29,10 @@ constexpr Uniform SceneUniforms[] = {
 	{"fogParam", 24}, {"bones", 25},
 	{"retailLightTexture", 0x68 + 0}, {"environmentMapped", 0x68 + 1}, {"diffuseLighting", 0x68 + 2},
 	{"skinned", 0x68 + 3}, {"skinnedNormals", 0x68 + 4},
+	// The sea glow's projection-mapped unit 0 (renderer.cpp projectedRows), after the bones.
+	{"projRow0", 82}, {"projRow1", 83}, {"projRow2", 84}, {"projectedUv0", 0x68 + 5},
 };
-constexpr int SceneRegisters = 25 + 57;
+constexpr int SceneRegisters = 25 + 57 + 3;
 constexpr Uniform EffectUniforms[] = {{"projection", 0}};
 constexpr int EffectRegisters = 4;
 
@@ -49,6 +51,8 @@ uniform vec4 c[25];
 uniform vec4 bones[57];
 uniform vec4 flags;
 uniform float flags2;
+uniform vec4 proj[3];
+uniform float flags3;
 varying vec4 vColor;
 varying vec4 vTc0;
 varying vec2 vTc1;
@@ -85,6 +89,9 @@ void main() {
 	vec3 r11 = vec3(v2.xy, 1.0);
 	vec4 t0 = vec4(dot(U(14).xyz, r11), dot(U(15).xyz, r11), 0.0, 1.0);
 	t0.xy += U(9).xy;
+	// GX projection-mapped texgen: (s*q, t*q, q) from the eye position; the
+	// fragment program divides by q (FragmentKey::projection0).
+	if (flags3 > 0.5) t0 = vec4(dot(proj[0].wzyx, mv), dot(proj[1].wzyx, mv), 0.0, dot(proj[2].wzyx, mv));
 	vTc0 = t0;
 	r11 = vec3(v2.zw, 1.0);
 	vec4 t1 = vec4(dot(U(16).xyz, r11), dot(U(17).xyz, r11), 0.0, 1.0);
@@ -244,6 +251,7 @@ std::string fragmentSource(const FragmentKey& k) {
 	std::string s;
 	s += "uniform sampler2D tex0;\nuniform sampler2D tex1;\nuniform sampler2D tex2;\n";
 	s += "uniform vec4 konst[6];\nuniform vec4 bufColor;\nuniform float alphaRef;\n";
+	if (k.constantAlpha) s += "uniform float blendAlpha;\n";
 	s += "varying vec4 vColor;\nvarying vec4 vTc0;\nvarying vec2 vTc1;\nvarying vec2 vTc2;\n";
 	s += "vec3 round3(vec3 x) { return floor(x * 255.0 + vec3(0.5)) / 255.0; }\n";
 	s += "float round1(float x) { return floor(x * 255.0 + 0.5) / 255.0; }\n";
@@ -283,6 +291,7 @@ std::string fragmentSource(const FragmentKey& k) {
 		case GPU_GEQUAL: s += "if (a8 < alphaRef) discard;\n"; break;
 		}
 	}
+	if (k.constantAlpha) s += "co.a = blendAlpha;\n";
 	s += "gl_FragColor = co;\n}\n";
 	return s;
 }
@@ -394,9 +403,12 @@ Program* programFor(const FragmentKey& key) {
 	p->vsBones = glGetUniformLocation(p->gl, "bones");
 	p->vsFlags = glGetUniformLocation(p->gl, "flags");
 	p->vsFlags2 = glGetUniformLocation(p->gl, "flags2");
+	p->vsProj = glGetUniformLocation(p->gl, "proj");
+	p->vsFlags3 = glGetUniformLocation(p->gl, "flags3");
 	p->konst = glGetUniformLocation(p->gl, "konst");
 	p->bufColor = glGetUniformLocation(p->gl, "bufColor");
 	p->alphaRef = glGetUniformLocation(p->gl, "alphaRef");
+	p->blendAlpha = glGetUniformLocation(p->gl, "blendAlpha");
 	for (int unit = 0; unit < 3; ++unit) {
 		char name[5] = {'t', 'e', 'x', char('0' + unit), 0};
 		const GLint at = glGetUniformLocation(p->gl, name);

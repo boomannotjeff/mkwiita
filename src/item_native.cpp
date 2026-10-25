@@ -17,10 +17,12 @@
 #include <game/kart/KartMove.hh>
 #include <game/kart/KartObjectManager.hh>
 #include <game/kart/KartState.hh>
+#include <game/kart/KartSuspensionPhysics.hh>
 #include <game/system/CourseMap.hh>
 #include <game/system/RaceManager.hh>
 #include <game/system/RaceConfig.hh>
 #include <game/system/ResourceManager.hh>
+#include "mkw/race_audio.hpp"
 #endif
 #include <algorithm>
 #include <cmath>
@@ -33,12 +35,17 @@ namespace K=Kinoko;
 Vec3 nativeVec(const K::EGG::Vector3f& v){return {v.x,v.y,v.z};}
 K::EGG::Vector3f sourceVec(Vec3 v){return {v.x,v.y,v.z};}
 K::Kart::KartObject* kart(unsigned player){return K::Kart::KartObjectManager::Instance()->object(player);}
-ItemSurface nativeSurface(Vec3 previous,Vec3 position,float radius){
+ItemSurface nativeSurface(Vec3 previous,Vec3 position,float radius,uint32_t types){
     K::Field::CollisionInfo info{};info.reset();K::Field::KCLTypeMask mask=0;
-    // Includes item-only walls/floors and moving course collision.
-    const auto flags=K::Field::KCLTypeMask(KCL_TYPE_64EBDFFF);
+    // Includes item-only walls/floors and moving course collision. ItemKclMask is 0x6CEBDFFF,
+    // the mask the item objects pass to CourseModel::checkSphereFullPush (scatter 0x807A73B8,
+    // 0x807B4EC8, 0x807B5554; at rest 0x807B6C74): with the non-solid item state modifier
+    // (type 27), which only reaches `types`. The Blue Shell passes BlueShellKclMask.
+    static_assert(ItemKclMask==KCL_TYPE_6CEBDFFF);
+    const auto flags=K::Field::KCLTypeMask(types);
     if(!K::Field::CollisionDirector::Instance()->checkSphereFull(radius,sourceVec(position),sourceVec(previous),flags,&info,&mask,0))return {};
-    return {nativeVec(info.tangentOff),nativeVec(info.floorNrm),nativeVec(info.wallNrm),bool(mask&(KCL_TYPE_BIT(COL_TYPE_FALL_BOUNDARY)|KCL_TYPE_BIT(COL_TYPE_SOLID_OOB))),bool(mask&KCL_TYPE_BIT(COL_TYPE_CANNON_TRIGGER))};
+    return {nativeVec(info.tangentOff),nativeVec(info.floorNrm),nativeVec(info.wallNrm),bool(mask&(KCL_TYPE_BIT(COL_TYPE_FALL_BOUNDARY)|KCL_TYPE_BIT(COL_TYPE_SOLID_OOB))),bool(mask&KCL_TYPE_BIT(COL_TYPE_CANNON_TRIGGER)),uint32_t(mask),
+            nativeVec(info.bbox.min),nativeVec(info.bbox.max),info.floorDist,info.wallDist,info.perpendicularity};
 }
 // The patched Kinoko KartAction/KartMove carry the retail gates; this only forwards.
 class NativeKarts final:public ItemKarts{
@@ -83,6 +90,18 @@ public:
         sphere.transform(K::EGG::Matrix34f::ident,K::EGG::Vector3f(1.f,1.f,1.f));
         K::EGG::Vector3f distance;
         return hull->check(sphere,distance);
+    }
+    unsigned objectContacts(unsigned type,unsigned owner,Vec3 position,Vec3 velocity,float radius,bool held,ItemObjectHit* hits,unsigned max)override{
+        auto* director=K::Field::ObjectDirector::Instance();
+        if(!director||type>=15)return 0;
+        const size_t n=director->checkItemObjectCollision(K::s16(type),K::u8(owner<12?owner:12),sourceVec(position),sourceVec(velocity),radius,held);
+        unsigned out=0;
+        for(size_t i=0;i<n&&out<max;++i)hits[out++]={nativeVec(director->hitDepth(i)),int16_t(director->reaction(i))};
+        // A Wiggler segment's item callback (PAL fn_1_1B6A8C): any item but a Bob-omb (object 9)
+        // flags it for the head's voice; GeoHitTableItemObj row 0xe2 never damages it.
+        for(size_t i=0;i<n;++i)if(type!=9&&director->collidingObject(i)->id()==K::Field::ObjectId::Hanachan)
+            noteRaceAudioHanachanBump(static_cast<const K::Field::ObjectBase*>(director->collidingObject(i)));
+        return out;
     }
 };
 // Our own interpolator on the rail Kinoko's RailManager built for a KMP
@@ -149,7 +168,7 @@ ItemRacer snapshot(unsigned i){
     r.up={pose[0,1],pose[1,1],pose[2,1]};r.scale=nativeVec(k->scale());r.levelUp=nativeVec(k->move()->smoothedUp());
     const auto& stats=k->param()->stats();
     r.itemGeometry={stats.itemUnk170,stats.itemUnk174,stats.itemUnk178,stats.itemUnk17c};
-    r.speedRatio=k->move()->speedRatioCapped();r.hop=k->move()->hopPosY();
+    r.speedRatio=k->move()->speedRatioCapped();r.hop=k->move()->hopPosY();r.baseSpeed=k->move()->statBaseSpeed();
     r.shellTargetUnavailable=status.onBit(S::TriggerRespawn,S::InRespawn,S::AfterRespawn,static_cast<S>(83));
     // Retail 7eaec/7ea0c use distinct masks. Retain unnamed source bits
     // where Kinoko has no producer yet; do not substitute unrelated flags.
@@ -157,6 +176,7 @@ ItemRacer snapshot(unsigned i){
     r.shellAcquireUnavailable=r.shellTargetUnavailable||bit(40)||bit(82)||bit(89);
     r.shellTargetProtected=r.shellAcquireUnavailable||bit(4)||bit(32)||bit(35)||bit(36)||bit(63)||bit(79)||bit(91);
     r.mushroomBoost=status.onBit(S::MushroomBoost);r.boosting=status.onBit(S::Boost);
+    r.moveDir=nativeVec(k->move()->vel1Dir());r.smoothedUp=nativeVec(k->move()->smoothedUp());
     r.trickRotating=status.onBit(S::ZipperTrick,S::TrickRot);
     r.damageAction=int8_t(k->action()->currentAction());r.zipperStick=status.onBit(S::ZipperStick);
     // KartAction::start's respawn family, read for item eligibility; the kart applies the
@@ -167,6 +187,11 @@ ItemRacer snapshot(unsigned i){
     r.mega=status.onBit(S::Mega)?uint16_t(std::max<int>(1,k->move()->megaTimer())):0;
     r.bullet=status.onBit(S::Bullet);r.shocked=status.onBit(S::Shocked);r.crushed=status.onBit(S::Crushed);
     r.inAction=status.onBit(S::InAction);
+    r.zipper=status.onBit(S::HalfPipeRamp,S::OverZipper);r.stickyRoad=status.onBit(S::StickyRoad);
+    r.airtimeOver20=status.onBit(S::AirtimeOver20);r.vanished=status.onBit(S::Vanished);r.stickX=k->inputs()->currentState().stick.x;
+    r.wheelie=status.onBit(S::Wheelie);
+    r.rearWheel=nativeVec(k->tirePhysics(k->param()->tireCount()-1)->pos());
+    r.wheelieReferenceFrame=K::System::RaceManager::Instance()->timer()==60;
     return r;
 }
 }
@@ -181,9 +206,14 @@ void RaceItems::nativeKartBump(void* context,size_t attacker,size_t victim){
     if(!items->active_||attacker>=items->count_||victim>=items->count_)return;
     items->cloudBump(unsigned(attacker),unsigned(victim),snapshot(unsigned(victim)));
 }
+// Kinoko ItemDirector::CreateCourseMushroom: a squashed Goomba's Mushroom.
+static void courseMushroomHook(void* context,const K::EGG::Vector3f& position,const K::EGG::Vector3f& velocity,uint8_t owner){
+    static_cast<RaceItems*>(context)->courseMushroom({position.x,position.y,position.z},{velocity.x,velocity.y,velocity.z},owner);
+}
 void RaceItems::unhookNative(){
     K::Kart::KartCollide::SetItemCollisionHook(nullptr,nullptr);
     K::Kart::KartCollide::SetKartBumpHook(nullptr,nullptr);
+    K::Item::ItemDirector::ClearCoursePickupHook(this);
 }
 void RaceItems::stepMovers(){
     using Status=K::Field::RailInterpolator::Status;
@@ -328,16 +358,19 @@ void RaceItems::resetFromCourse(unsigned count,uint32_t seed){
     for(const auto& m:movers_)if(m.kind==ItemBoxMover::Kind::Line)boxes_[m.box].active=false;
     size_t kmpSize=0;const void* kmp=K::System::ResourceManager::Instance()->getFile("course.kmp",&kmpSize,K::System::ArchiveId::Course);
     loadShellRoute(kmp,kmpSize,unsigned(K::System::RaceConfig::Instance()->raceScenario().course));
+    engineClass_=K::System::RaceConfig::Instance()->raceScenario().engineClass;
     size_t oddsSize=0;const auto* odds=K::System::ResourceManager::Instance()->getFile("ItemSlot.bin",&oddsSize,K::System::ArchiveId::Core);
     // Battle tables (ItemSlot.bin 6/7 Balloon Battle, 8/9 Coin Runners).
     if(battleOdds_==1)loadOdds(odds,oddsSize,6,7);
     else if(battleOdds_==2)loadOdds(odds,oddsSize,8,9);
+    else if(grandPrix_)loadOdds(odds,oddsSize,0,1);
     else loadOdds(odds,oddsSize);
     odds_.applyMode(itemMode_);
     if(itemMode_==3)for(auto& box:boxes_){box.active=false;box.respawn=0;}
     for(unsigned i=0;i<count_;++i){K::Item::ItemDirector::Instance()->kartItem(i).clear();(void)K::Item::ItemDirector::Instance()->kartItem(i).takeLossRequests();}
     K::Kart::KartCollide::SetItemCollisionHook(&RaceItems::nativeKartPass,this);
     K::Kart::KartCollide::SetKartBumpHook(&RaceItems::nativeKartBump,this);
+    K::Item::ItemDirector::SetCoursePickupHook(&courseMushroomHook,this);
 }
 void RaceItems::snapshotNative(unsigned count,std::array<ItemRacer,MaxRacers>& out) const{
     for(unsigned i=0;i<std::min(count,MaxRacers);++i)out[i]=snapshot(i);

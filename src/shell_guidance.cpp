@@ -38,11 +38,12 @@ int RaceItems::blueTarget(const ItemActor& a)const{
 int RaceItems::redTarget(const ItemActor& a,bool ranked)const{
     // 298d88: nearest XZ within 4000, forward cone (sin=.95), signed
     // floor-normal height [-1500,1000], source rank and protection filters.
-    // Battle: the nearest enemy in the cone, race ranks ignored.
+    // No finish filter: acquisition (0x807B3BAC -> 0x807B381C) also locks onto
+    // racers who have crossed the line. Battle: the nearest enemy in the cone, race ranks ignored.
     int result=-1;float best=16000000.f;unsigned ownerRank=rank(unsigned(a.owner));
     if(battleOdds_)ranked=false;
     for(unsigned i=0;i<count_;++i){const auto& r=racers_[i];unsigned candidateRank=battleOdds_?1:rank(i);
-        if(int(i)==a.owner||r.finished||missing(r))continue;
+        if(int(i)==a.owner||missing(r))continue;
         if(battleOdds_&&a.owner>=0&&BalloonBattle::team(i)==BalloonBattle::team(unsigned(a.owner)))continue;
         if(ranked&&ownerRank<=candidateRank){if(ownerRank!=1||candidateRank>3||(candidateRank==1&&count_>1))continue;}
         if(candidateRank!=1&&(r.shellTargetProtected||r.controlLocked||r.inCannon||invincible(i)||hud_[i].mega))continue;
@@ -66,7 +67,11 @@ void RaceItems::launchShell(ItemActor& a,unsigned player){
     const float base=blue?60.f:a.backwards?30.f:75.f;
     a.travelSpeed=a.backwards?(forward?base-speed:base+speed):(forward?base+speed:base-speed);
     a.flightDirection=normalized(direction*(a.backwards?40.f:35.f)+(forward?(a.backwards?-v:v):Vec3{}),direction);
+    if(!blue)a.flightDirection=a.backwards?backwardThrow(player,a.travelSpeed):forwardThrow(player,base,a.travelSpeed);
     a.velocity=a.flightDirection*a.travelSpeed;a.velocity.y=0;s.up=normalized(r.up,{0,1,0});a.target=-1;
+    // fn_1_2A4DC4 (0x807B5178): +0x1b0 starts as the direction; a throw from a half-pipe ramp
+    // or over a zipper (status 41 / 42) starts the 30-frame slope timer +0x1d8.
+    if(!blue){a.shellDirection=a.flightDirection;s.slopeTicks=r.zipper?30:0;}
     a.lifetime=blue?65535:2401;a.bounceLimit=1;
     s.current={itemPoint(player),true};if(!shellRoute_.valid(s.current))s.current=shellRoute_.nearest(r.position);
     s.hasRoute=shellRoute_.valid(s.current)&&shellRoute_.valid(shellRoute_.edge(s.current))&&!a.backwards;
@@ -77,8 +82,177 @@ void RaceItems::launchShell(ItemActor& a,unsigned player){
     s.launchTicks=blue?20:45;s.visualY=a.position.y;s.approachSpeed=260;
     if(blue){a.target=int8_t(target);s.ownerLed=target==a.owner;if(target>=0){s.lastTarget=racers_[target].position;s.leaderMask|=uint16_t(1u<<target);}if(!s.hasRoute){a.travelSpeed=85+(forward?speed:-speed);a.velocity=a.flightDirection*a.travelSpeed;s.approachSpeed=length(a.velocity);}}
 }
+namespace {
+// fn_1_276F0C (0x807872C0): normalised when |v|^2 > 0 (0x808A4808), else `keep`.
+Vec3 retailUnit(Vec3 v,Vec3 keep){const float q=dot(v,v);return q>0?v*(1/std::sqrt(q)):keep;}
+}
+// ItemHolderPlayer_update (PAL 0x80797928), every step before the holder's input, unless the
+// racer has vanished (status 83). +0x23c follows the stick X by at most 1/15 (0x808A5188).
+// +0x40: the slope of the kart's last move (clamped to +-0.85 after 20 air frames, 0x808A518C
+// / 5190) blended from the kart's Z slope (0 in an action or a trick, fn_1_2AD3D8 0x807BD78C) by
+// the speed ratio, times 0.9 (0x808A5194 / 5198), eased 0.05 (0x808A519C) toward. A kart that
+// has not moved leaves the last slope (retail reads an uninitialised value there; at speed
+// ratio 0 the blend ignores it).
+void RaceItems::updateThrowPitch(unsigned i){
+    const auto& r=racers_[i];if(r.vanished)return;
+    auto& t=throwPitch_[i];
+    constexpr float AimStep=.0666666701f;
+    t.aim=r.stickX<=t.aim?std::max(r.stickX,t.aim-AimStep):std::min(r.stickX,t.aim+AimStep);
+    const Vec3 d=t.placed?r.position-t.last:Vec3{};t.last=r.position;t.placed=true;
+    if(dot(d,d)>0)t.slope=d.y/length(d);
+    const float slope=r.airtimeOver20?std::clamp(t.slope,-.85f,.85f):t.slope;
+    const float base=r.inAction||r.trickRotating?0.f:r.forward.y;
+    t.pitch+=.05f*(.9f*(base+r.speedRatio*(slope-base))-t.pitch);
+}
+// fn_1_281AA8 (0x80791E5C), each rebuild of the held frame: the anchor's change since the
+// last one, the axes, the speed ratio +0x98 and +0xac (Z along the kart's velocity, or in an
+// action or a trick).
+void RaceItems::noteHeldFrame(unsigned player,Vec3 anchor,Vec3 right,Vec3 up,Vec3 forward){
+    auto& m=heldMotion_[player];const auto& r=racers_[player];
+    m.delta=anchor-m.anchor;m.anchor=anchor;m.right=right;m.up=up;m.forward=forward;m.ratio=r.speedRatio;
+    m.ahead=dot(forward,r.haveVelocity?r.velocity:r.forward*r.speed)>0||r.inAction||r.trickRotating;
+}
+// A backward throw's speed and direction: fn_1_284C7C (0x80795030) with 30 / 1 / 40
+// (0x808A6124 / 611C / 6128) from the held frame.
+Vec3 RaceItems::backwardThrow(unsigned player,float& speed)const{
+    const auto& m=heldMotion_[player];const auto& r=racers_[player];
+    float moved=length(m.delta);Vec3 dir;
+    if(!m.ahead){speed=30+moved;dir=-m.forward;}
+    else{moved=std::min(moved,r.baseSpeed);speed=30-moved;dir=-(m.forward*40+Vec3{m.delta.x,0,m.delta.z});}
+    return finishThrow(player,dir);
+}
+// A forward throw's: fn_1_284AD4 (0x80794E88) with the shell's base (Green 85 0x808A5DBC,
+// Red 75 0x808A5AB0), 1 and 35 (0x808A611C / 6120). On the move: 35 Z, plus the anchor's whole
+// change when it points along it, plus X times -20 (0x808A4D38) x speed ratio x +0x23c.
+Vec3 RaceItems::forwardThrow(unsigned player,float base,float& speed)const{
+    const auto& m=heldMotion_[player];
+    const float moved=length(m.delta);Vec3 dir;
+    if(!m.ahead){speed=base-moved;dir=m.forward;}
+    else{
+        speed=base+moved;dir=m.forward*35;
+        if(dot(dir,m.delta)>0)dir=dir+m.delta;
+        dir=dir+m.right*(20*-m.ratio*throwPitch_[player].aim);
+    }
+    return finishThrow(player,dir);
+}
+// fn_1_284968 (0x80794D1C, its parameter 0): a near-flat direction becomes the frame's Y
+// (0x808A4D88); on sticky road (status 16) it is projected onto the plane of KartMove +0x38
+// (smoothed up) plus 0.2 Z (0x808A4CE8); otherwise fn_1_2CF2DC (0x807DF690) gives it the
+// holder's +0x40 as its vertical part and scales the horizontal part to a unit vector.
+Vec3 RaceItems::finishThrow(unsigned player,Vec3 dir)const{
+    const auto& m=heldMotion_[player];const auto& r=racers_[player];
+    if(dir.x*dir.x+dir.z*dir.z<.0001f)dir=m.up;
+    if(r.stickyRoad){
+        const Vec3 n=retailUnit(r.smoothedUp+m.forward*.2f,r.smoothedUp+m.forward*.2f);
+        dir=tangent(dir,n);
+    }else{
+        const float p=throwPitch_[player].pitch,xz=dir.x*dir.x+dir.z*dir.z;
+        if(xz<=0)dir={0,p>0?1.f:-1.f,0};
+        else{const float k=(1-p*p)/xz,scale=k>0?std::sqrt(k):0.f;dir={dir.x*scale,p,dir.z*scale};}
+    }
+    return retailUnit(dir,dir);
+}
+// fn_1_2A5140 (PAL 0x807B54F4): the Green Shell's movement (0x807AEC64, toward 105) and the
+// unguided Red's (states 1 and 2 toward 105, 0x807AAB88 / 0x807AAD78; state 6 toward 140,
+// 0x807AB37C). `up` is the object's up +0xc8. The bounce count +0x1c8 is bounceLimit - 1 -
+// bounces (broken below 0); +0x1d8 is guidance.slopeTicks.
+void RaceItems::moveShell(ItemActor& a,ItemWorldQuery query,Vec3& up,float target){
+    constexpr uint32_t Floors=0x20E80FFF,Walls=0xD010F000,HalfPipe=0x80000,Cannon=0x20000,FallBoundary=0x10000,SolidOob=0x400;
+    auto& s=a.guidance;
+    // fn_1_296860 -> fn_1_296644 (0x807A69F8): destroyed, as the scatter state does it.
+    auto destroy=[&]{const bool fell=a.position.y<0.f;a.dying=fell?30:6;a.radius=0;if(!fell)a.scale=0;};
+    // A reflection off a horizontal normal (fn_1_2CE504 twice, with SE_ITM_KAME_HANSHA through
+    // fn_1_292B64), its rise damped 0.7 (0x808A6144) toward the old fall.
+    auto reflect=[&](Vec3 n){
+        const float fall=a.flightDirection.y;const Vec3 along=n*dot(a.flightDirection,n);
+        a.flightDirection=a.flightDirection-along-along;sound(ItemSoundCue::WallBounce,a);
+        float& y=a.flightDirection.y;if(y>0&&y>-fall)y+=.7f*(-fall-y);
+        a.flightDirection=retailUnit(a.flightDirection,a.flightDirection);a.shellDirection=a.flightDirection;
+    };
+    if(a.airFrames<6)++a.airFrames;   // ItemObj_update +0x15c, before the state
+    a.position+=a.velocity;
+    ItemSurface hit=query?query(a.previous,a.position,a.terrainRadius,ItemKclMask):ItemSurface{};
+    if(hit.types&FallBoundary){a.active=false;return;}   // fall boundary, as the port handled it before
+    bool collided=hit.types!=0,steep=false,pushed=false,bounced=false;   // bounced: +0x74 bit 0x20
+    // A near-vertical floor (normal y < 0.003, 0x808A6138) or a half-pipe ramp starts the slope
+    // timer; after 300 frames it also costs a bounce.
+    if((hit.types&Floors)&&(hit.floorNormal.y<.00300002f||(hit.types&HalfPipe))){
+        if(a.age>300&&s.slopeTicks<1)++a.bounces;
+        s.slopeTicks=30;steep=true;
+    }
+    if(s.slopeTicks>0&&query){
+        // While it runs, walls (0xD010F000) push the shell like a floor unless they face down
+        // (normal y < -0.98, 0x808A613C), which turns the shell's rise into a fall and costs a bounce.
+        const ItemSurface w=query(a.previous,a.position,a.terrainRadius,Walls);
+        if(w.types){
+            collided=pushed=true;
+            const float d=length(w.correction);const Vec3 n=d>0?w.correction*(1/d):Vec3{};
+            hit.low={std::min(hit.low.x,w.correction.x),std::min(hit.low.y,w.correction.y),std::min(hit.low.z,w.correction.z)};
+            hit.high={std::max(hit.high.x,w.correction.x),std::max(hit.high.y,w.correction.y),std::max(hit.high.z,w.correction.z)};
+            if(w.wallNormal.y>=-.98f){if(hit.floorDist<d){hit.floorDist=d;hit.floorNormal=n;}}
+            else{
+                pushed=false;
+                if(a.shellDirection.y>0)a.shellDirection.y=-a.shellDirection.y;
+                a.ownerImmunity=0;++a.bounces;bounced=true;
+            }
+            hit.correction=hit.low+hit.high;
+        }
+    }
+    if(collided){
+        a.position+=hit.correction;
+        if((hit.types&Floors)||pushed){
+            const Vec3 n=hit.floorNormal;
+            if(s.slopeTicks<1){
+                a.shellDirection=retailUnit(tangent(a.flightDirection,n),tangent(a.flightDirection,n));a.flightDirection=a.shellDirection;
+            }else if(a.bounces<a.bounceLimit){
+                // During the timer the direction follows the velocity along the floor.
+                a.shellDirection=retailUnit(tangent(a.velocity,n),tangent(a.velocity,n));
+                if(shellXZ2(a.shellDirection)>=.0001f)a.flightDirection=a.shellDirection;   // 0x808A6134
+            }else{reflect({n.x,0,n.z});bounced=true;}
+            if(n.y>=-.98f)up=n;
+        }
+        if(s.slopeTicks<1&&(hit.types&Walls)){
+            Vec3 w=hit.wallNormal;
+            if(w.y>=.98f){destroy();return;}   // 0x808A6148
+            w.y=0;
+            if(dot(a.flightDirection,w)<0){
+                reflect(w);a.ownerImmunity=0;++a.bounces;bounced=true;
+                if(a.solidFallTimer)a.bounces=a.bounceLimit;   // +0x15e set: the bounce breaks it
+            }
+        }
+        if(hit.types&(Floors|Walls))a.velocity=a.shellDirection*a.travelSpeed;
+        // On a floor without a wall the rise keeps at least this step's climb, at most 50
+        // (0x808A614C) without the timer.
+        if(a.age>2&&(hit.types&Floors)&&!(hit.types&Walls)){
+            float climb=a.position.y-a.previous.y;
+            if(s.slopeTicks<1&&climb>50)climb=50;
+            if(a.velocity.y<climb)a.velocity.y=climb;
+        }
+        if(a.bounces>=a.bounceLimit){shatter(a);return;}
+        if(hit.types&Cannon){destroy();return;}
+    }
+    if(s.slopeTicks<1)a.travelSpeed+=.01f*(target-a.travelSpeed);   // 0x808A6150
+    if(collided&&!steep&&!pushed&&s.slopeTicks>0)--s.slopeTicks;
+    if(!(hit.types&Floors)||s.slopeTicks>0){
+        // Gravity 2 falling, 4.2 rising (0x808A6168 / 6158); airborne for 5 updates, the fall
+        // stops at -100 and the rise is damped 0.9 (0.125 above 100).
+        float& vy=a.velocity.y;
+        if(vy<=0){vy-=2;if(a.airborne&&vy<-100)vy=-100;}
+        else{vy-=4.2f;if(a.airborne)vy*=vy>100?.125f:.9f;}
+    }else a.velocity=a.velocity-up*2.5f;   // 0x808A6154
+    // ItemObj_update after the state: a floor clears +0x15c; from 5 on bit 0x20 is set and the
+    // up eases 0.05 (0x808A5248) toward world up while its y is under 0.98 (0x808A5244).
+    if(hit.types&Floors)a.airFrames=0;
+    // The solid-fall timer +0x15e: a floor contact with solid-OOB KCL (0x400) and no bounce this
+    // update starts 60 frames; they run while no other floor (0x20E80BFF) is touched and destroy
+    // the shell at 0.
+    if((hit.types&Floors)&&(hit.types&SolidOob)&&!bounced&&!a.solidFallTimer)a.solidFallTimer=60;
+    if(a.solidFallTimer&&!(hit.types&0x20E80BFF)&&!--a.solidFallTimer){destroy();return;}
+    a.airborne=a.airFrames>=5;
+    if(a.airborne&&up.y<.98f)up=retailUnit(up*.95f+Vec3{0,.05f,0},up*.95f+Vec3{0,.05f,0});
+}
 void RaceItems::shellTerrain(ItemActor& a,ItemWorldQuery query,bool blue,bool route,bool approach){
-    auto& s=a.guidance;ItemSurface surface=query?query(a.previous,a.position,a.terrainRadius):ItemSurface{};
+    auto& s=a.guidance;ItemSurface surface=query?query(a.previous,a.position,a.terrainRadius,a.kind==ItemKind::BlueShell?BlueShellKclMask:ItemKclMask):ItemSurface{};
     // 29a558 / 29b494: cannon KCL destroys ordinary shells; object ID 5
     // (Spiny) is explicitly exempt. It follows the authored airborne route.
     if(surface.cannon&&!blue){a.active=false;return;}
@@ -196,9 +370,9 @@ void RaceItems::updateShell(ItemActor& a,ItemWorldQuery query){
                 }
             }
         }else{
-            a.position+=a.velocity;shellTerrain(a,query,false,false);if(!s.slopeTicks)a.travelSpeed+=.01f*((s.phase==6?140.f:105.f)-a.travelSpeed);
+            moveShell(a,query,s.up,s.phase==6?140.f:105.f);   // 0x808A5AB4 / 0x808A5AD0
         }
-        if(a.active&&(s.phase==2||s.phase==3)&&s.pending<0&&s.ticks>4){
+        if(a.active&&!a.dying&&(s.phase==2||s.phase==3)&&s.pending<0&&s.ticks>4){
             int target=redTarget(a,s.phase==3);
             // Acquisition (0x807a4dbc) seeds +0x294 with the target's back axis.
             if(target>=0){a.target=int8_t(target);s.pending=4;s.targetBack=-normalized(racers_[target].forward,{0,0,1});s.homing={};}
@@ -223,17 +397,15 @@ void RaceItems::updateShell(ItemActor& a,ItemWorldQuery query){
             if(a.target<0||unsigned(a.target)>=count_){a.active=false;return;}
             const auto& r=racers_[a.target];
             if(missing(r))s.targetLive=false;if(s.targetLive)s.lastTarget=r.position;
-            // The wheelie's pitch must not tip the orbit and dive behind a bike (issue #13).
-            Vec3 forward,up;items::heldFrame(r,forward,up);const Vec3 right=normalized(cross(up,forward),{1,0,0});
+            // fn_1_2A3C28 (0x807B3FDC) / fn_1_2A407C (0x807B4430) copy the target's
+            // KartMove +0x74 (vel1Dir, its direction of travel) into +0x284 every
+            // update; the orbit's side axis is vel1Dir x KartMove +0x38 (smoothedUp).
             if(s.phase==2||s.phase==3){
                 s.approachSpeed=shellMoveToward(s.approachSpeed,130,8);
                 if(s.phase==3){s.height-=7.5f;s.orbitStep=uint16_t(s.orbitStep+35);s.orbitRadius-=s.orbitAngle<0x8000?4:8;s.orbitAngle+=s.orbitStep;}
-                s.orbitOffset=(right*sinAngle(s.orbitAngle)+up*cosAngle(s.orbitAngle))*s.orbitRadius;
-                // The loop is centred ahead of the target and low, so it plays inside the target's
-                // own camera view; centred 300 above the kart (with the drawn height on top) it
-                // passed over the player's camera and only the dive was seen.
-                // shortcut: 600 ahead / 150 up tuned by eye, not retail values; check against WiiCompiled.
-                Vec3 d=s.lastTarget+forward*600+up*150+s.orbitOffset-a.position;
+                // A horizontal circle about the point 300 (0x808A60B0) ahead of the leader.
+                s.orbitOffset=(cross(r.moveDir,r.smoothedUp)*cosAngle(s.orbitAngle)+r.moveDir*sinAngle(s.orbitAngle))*s.orbitRadius;
+                Vec3 d=s.lastTarget+r.moveDir*300+s.orbitOffset-a.position;
                 bool cannonOrbit=s.phase==3&&r.inCannon&&shellCourse_!=29;
                 Vec3 desired=d*(s.phase==2||cannonOrbit?.5f:.3f);
                 if(s.phase==2&&a.velocity.x*desired.x+a.velocity.z*desired.z<0){
@@ -243,23 +415,27 @@ void RaceItems::updateShell(ItemActor& a,ItemWorldQuery query){
                 desired=shellLimit(desired,cannonOrbit?600.f:s.approachSpeed);
                 float response=s.phase==2?.125f:.5f;if(!s.hasRoute&&a.age<30)response*=float(a.age)/30;
                 a.velocity=lerp(a.velocity,desired,response);a.position+=a.velocity;
-                // The loop rides along with the target: steering alone trails a fast kart,
-                // and the circle then happens behind the camera instead of around the racer.
-                if(s.phase==3&&!cannonOrbit&&s.targetLive)a.position+=motion(r);
-                if(query){auto surface=query(a.previous,a.position,a.terrainRadius);a.position.y+=surface.correction.y;}
+                if(query){auto surface=query(a.previous,a.position,a.terrainRadius,BlueShellKclMask);a.position.y+=surface.correction.y;}
                 if(s.phase==2&&shellXZ2(d)<640000)s.pending=3;
                 if(s.phase==3&&s.orbitAngle>=0x11f40)s.pending=4;
             }else{
                 s.height+=s.phase==4?3:-70;
-                float response=r.inCannon&&shellCourse_!=29?.5f:s.phase==4?s.amplitude:(s.dodge?.25f:.7f);
-                Vec3 destination=s.lastTarget+up*210+Vec3{0,s.height,0};a.velocity=(destination-a.position)*response;a.position+=a.velocity;
-                // The rise also rides along; a Mushroom dodge (and the dive) keep the retail lag.
-                if(s.phase==4&&!s.dodge&&!r.inCannon&&s.targetLive)a.position+=motion(r);
-                // 296f80 moves with the old response, updates it, then
-                // detects a dodge for the next tick (150cc response floor .25).
+                // fn_1_29D854 (0x807ADC08): the dodge response floor by engine class
+                // (RaceConfig +0xB6C): .22 at 100cc, .25 at 150cc, .2 otherwise (.15
+                // online, bss 61DB, which an offline port never sets).
+                const float dodgeFloor=engineClass_==1?.22f:engineClass_==2?.25f:.2f;
+                float response=r.inCannon&&shellCourse_!=29?.5f:s.phase==4?s.amplitude:(s.dodge?dodgeFloor:.7f);
+                // States 4/5 (0x807ADC5C / 0x807ADFA4): 210 (0x808A60C8) ahead of the
+                // leader along its direction of travel, plus the height.
+                Vec3 destination=s.lastTarget+r.moveDir*210+Vec3{0,s.height,0};a.velocity=(destination-a.position)*response;a.position+=a.velocity;
+                // 0x807ADC5C moves with the old response, updates it, then detects a
+                // dodge for the next tick.
                 if(s.phase==4){
-                    s.amplitude=s.dodge?std::max(.25f,s.amplitude-.05f):std::min(.7f,s.amplitude+.005f);
-                    if(s.ticks>8&&(r.mushroomBoost||(r.inCannon&&shellCourse_==29)))s.dodge=true;
+                    if(s.dodge)s.amplitude=std::max(dodgeFloor,s.amplitude-.05f);
+                    else if(s.amplitude<.7f)s.amplitude+=.005f;
+                    // The target's ItemHolderPlayer +0x238: set only for the update in
+                    // which it activated a Mushroom (use, Golden use or a dropped one).
+                    if(s.ticks>8&&(mushroomPulse_[unsigned(a.target)]||(r.inCannon&&shellCourse_==29)))s.dodge=true;
                     if(s.ticks>24)s.pending=5;
                 }
                 if(s.phase==5){
@@ -267,7 +443,7 @@ void RaceItems::updateShell(ItemActor& a,ItemWorldQuery query){
                     const auto prop=itemProperties(unsigned(a.kind));
                     a.terrainRadius=prop.terrain*s.stretch;
                     bool impact=s.height<(r.inCannon?-900.f:-100.f);
-                    if(query){auto surface=query(a.previous,a.position,a.terrainRadius);a.position+=surface.correction;impact=impact||length(surface.floorNormal)>.1f||length(surface.wallNormal)>.1f;}
+                    if(query){auto surface=query(a.previous,a.position,a.terrainRadius,BlueShellKclMask);a.position+=surface.correction;impact=impact||length(surface.floorNormal)>.1f||length(surface.wallNormal)>.1f;}
                     if(impact){explode(a);return;}
                     // fn_28F9D0: the model stretches toward 1.5 tall while its sides follow
                     // 2*scale-height; the kart sphere registered at the dive's start
@@ -295,7 +471,9 @@ void RaceItems::updateShell(ItemActor& a,ItemWorldQuery query){
             s.visualY+=error*response;
         }
     }
-    a.yaw=std::atan2(a.position.x-a.previous.x,a.position.z-a.previous.z);
+    // The Blue keeps the thrower's pose from its launch (fn_1_29E338 0x807AE6EC sets its
+    // quaternion +0x10 from the kart pose; no Blue state writes it again).
+    if(!blue)a.yaw=std::atan2(a.position.x-a.previous.x,a.position.z-a.previous.z);
     if(!std::isfinite(a.position.x)||!std::isfinite(a.position.y)||!std::isfinite(a.position.z)||a.position.y<-100000)a.active=false;
 }
 }

@@ -482,8 +482,9 @@ GLenum glDepthTestFunc(u8 f) {
 GLenum glBlendFactor(u8 f) {
 	static const GLenum factors[15] = {GL_ZERO, GL_ONE, GL_SRC_COLOR, GL_ONE_MINUS_SRC_COLOR, GL_DST_COLOR, GL_ONE_MINUS_DST_COLOR,
 		GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_DST_ALPHA, GL_ONE_MINUS_DST_ALPHA,
-		// vitaGL has no constant blend colour; the game never selects these.
-		GL_ONE, GL_ONE, GL_ONE, GL_ONE, GL_SRC_ALPHA_SATURATE};
+		// vitaGL has no constant blend colour. Constant alpha (Time Trial ghosts) is
+		// the fragment's own alpha: the fragment program writes it (blendAlpha).
+		GL_ONE, GL_ONE, GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_SRC_ALPHA_SATURATE};
 	return f < 15 ? factors[f] : GL_ONE;
 }
 GLenum glBlendEquation(u8 e) {
@@ -690,6 +691,7 @@ void prepareDraw(uint32_t firstVertex, uint32_t endVertex) {
 	for (int u = 0; u < 3; ++u) if (state.tex[u] && state.tex[u]->data) key.units |= 1 << u;
 	key.projection0 = state.tex[0] && C3D_TexGetType(state.tex[0]) == GPU_TEX_PROJECTION;
 	key.vertexProgram = state.program;
+	key.constantAlpha = state.blendFactor[0] == GPU_CONSTANT_ALPHA || state.blendFactor[1] == GPU_ONE_MINUS_CONSTANT_ALPHA;
 	// Consecutive draws usually share their combiner: skip the lookup.
 	static FragmentKey lastKey;
 	static Program* lastProgram = nullptr;
@@ -705,6 +707,8 @@ void prepareDraw(uint32_t firstVertex, uint32_t endVertex) {
 		if (C3D_FVUnifDirty[0][i]) { C3D_FVUnifDirty[0][i] = false; constChanged = true; }
 	for (int i = 25; i < 82; ++i)
 		if (C3D_FVUnifDirty[0][i]) { C3D_FVUnifDirty[0][i] = false; bonesChanged = true; }
+	for (int i = 82; i < 85; ++i)
+		if (C3D_FVUnifDirty[0][i]) { C3D_FVUnifDirty[0][i] = false; constChanged = true; }
 	if (C3D_BoolUnifsDirty[0]) { C3D_BoolUnifsDirty[0] = false; constChanged = true; }
 	if (constChanged) ++uniformVersion;
 	static uint32_t bonesVersion = 0;
@@ -716,7 +720,9 @@ void prepareDraw(uint32_t firstVertex, uint32_t endVertex) {
 			const u16 b = C3D_BoolUnifs[0];
 			glUniform4f(p->vsFlags, b & 1 ? 1.f : 0.f, b & 2 ? 1.f : 0.f, b & 4 ? 1.f : 0.f, b & 8 ? 1.f : 0.f);
 			glUniform1f(p->vsFlags2, b & 16 ? 1.f : 0.f);
+			if (p->vsFlags3 >= 0) glUniform1f(p->vsFlags3, b & 32 ? 1.f : 0.f);
 		}
+		if (p->vsProj >= 0) glUniform4fv(p->vsProj, 3, reinterpret_cast<const GLfloat*>(&C3D_FVUnif[0][82]));
 	}
 	if (p->vsBones >= 0 && (C3D_BoolUnifs[0] & 8) && p->uploadedBones != bonesVersion) {
 		p->uploadedBones = bonesVersion;
@@ -734,6 +740,7 @@ void prepareDraw(uint32_t firstVertex, uint32_t endVertex) {
 		if (p->alphaRef >= 0) glUniform1f(p->alphaRef, float(state.alphaRef));
 		p->bufUploaded = state.envBufColor; p->alphaUploaded = int(state.alphaRef); p->fragmentUploaded = true;
 	}
+	if (p->blendAlpha >= 0) glUniform1f(p->blendAlpha, float(state.blendColor >> 24) / 255.f);
 
 	const uint64_t t1 = profileNow();
 	for (int u = 0; u < 3; ++u) bindTexture(u, state.tex[u]);
@@ -1108,6 +1115,28 @@ extern "C" C3D_RenderTarget* c3dvita_RenderTargetCreate(int width, int height, G
 	state.targetDirty = true;
 	invalidateApplied();
 	return &t->c3d;
+}
+// The pause backdrop (Renderer::captureTopTexture): the target's last frame read back
+// once into tex, laid out as a texture-backed target (texel (x,y) is window (x,y)).
+extern "C" bool c3dvita_CaptureTarget(C3D_RenderTarget* source, C3D_Tex* tex) {
+	Target* t = source ? targetOf(source) : nullptr;
+	LightLock_Lock(&textureLock);
+	GpuTexture* record = tex && tex->data ? findTexture(tex->data) : nullptr;
+	LightLock_Unlock(&textureLock);
+	if (!t || !record || t->glWidth > scaled(tex->width) || t->glHeight > scaled(tex->height)) return false;
+	flushClear(t);
+	std::vector<uint8_t> pixels(size_t(t->glWidth) * t->glHeight * 4);
+	glBindFramebuffer(GL_FRAMEBUFFER, t->fbo);
+	boundFramebuffer = ~0u;
+	glReadPixels(0, 0, t->glWidth, t->glHeight, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
+	if (!record->gl) glGenTextures(1, &record->gl);
+	glBindTexture(GL_TEXTURE_2D, record->gl);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, scaled(tex->width), scaled(tex->height), 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+	glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, t->glWidth, t->glHeight, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
+	record->renderTarget = true; record->dirty = false; record->appliedParam = ~0u;
+	state.targetDirty = true;
+	invalidateApplied();
+	return true;
 }
 extern "C" C3D_RenderTarget* c3dvita_RenderTargetCreateFromTex(C3D_Tex* tex, GPU_TEXFACE, int, int depthFmt) {
 	LightLock_Lock(&textureLock);

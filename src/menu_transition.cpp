@@ -35,12 +35,16 @@ const char* uiSelectedMenuControl(const MenuState& state,bool back){
  if(back)return "Back";
  switch(state.page){
  case UiPage::Title:return "PressStart";
- case UiPage::License:return state.cursor<2?"LicenseSelectT":"LicenseSelectB";
- case UiPage::MainMenu:return state.cursor==0?"TopMenuSingle":state.cursor<4?"TopMenuMulti":state.cursor<6?"TopMenuWifi":"TopMenuChannel";
+ case UiPage::License:return state.cursor==4?"LicenseSelectS":state.cursor<2?"LicenseSelectT":"LicenseSelectB";
+ case UiPage::Options:return "YesNoButton";
+ case UiPage::Controls:case UiPage::GameSettings:return "VSSetting";
+ case UiPage::MainMenu:return state.cursor==0?"TopMenuSingle":state.cursor<4?"TopMenuMulti":state.cursor<6?"TopMenuWifi":state.cursor<7?"TopMenuChannel":"FileAdmin";
+ case UiPage::LicenseSettings:return "FileAdminTop";
+ case UiPage::EraseLicense:return "YesNoButton";
  case UiPage::Mode:return "SingleTop";
  case UiPage::EngineClass:return "ClassSelect2";
- case UiPage::VSMode:return "VSSelect";
- case UiPage::BattleMode:return "BattleSelect";
+ case UiPage::VSMode:return state.cursor==2?"RuleSetting":"VSSelect";
+ case UiPage::BattleMode:return state.cursor==2?"RuleSetting":"BattleSelect";
  case UiPage::Rules:{
   unsigned row,option;state.ruleCursor(row,option);const bool battle=state.selection.mode==UiMode::Battle;
   if(state.ruleRow(row).row==UiRuleRow::Ok)return battle?"BattleSetting":"VSSetting";
@@ -51,7 +55,7 @@ const char* uiSelectedMenuControl(const MenuState& state,bool back){
   return controls[std::min(state.cursor/8,3u)];
  }
  case UiPage::Vehicle:return state.columns()==2?"MachineSelect2_6":"MachineSelect1_6";
- case UiPage::Drift:return "PadEasy";
+ case UiPage::Drift:return state.cursor==2?"DriftHelp":"PadEasy";
  case UiPage::Cup:return "CupSelectCup";
  case UiPage::Course:return "CourseSelectCourse";
  case UiPage::BattleCup:return "BattleCupSelectCup";
@@ -59,7 +63,7 @@ const char* uiSelectedMenuControl(const MenuState& state,bool back){
  case UiPage::Ghost:return "TimeAttackGhostList";
  case UiPage::Confirm:return "MenuEndConfirm";
  case UiPage::Pause:return uiPauseMenuControl(state);
- case UiPage::QuitConfirm:return "YesNoButton";
+ case UiPage::QuitConfirm:return uiPauseMenuControl(state); // AfterMenuEndConfirm's animations (menu_ui.cpp)
  case UiPage::Error:return "ConfirmOK";
  default:return "";
  }
@@ -86,9 +90,15 @@ float uiMenuMaxDelay(const MenuState& state){
  case UiPage::BattleCup:return std::max(maximum("BattleCupSelectCup"),delay("BattleCupSelectNULL","CupSelectCourseNULL")+maximum("BattleCupSelectStage"));
  case UiPage::BattleStage:return maximum("BattleStageSelectStage");
  case UiPage::Ghost:return maximum("TimeAttackGhostList");
- case UiPage::Confirm:return maximum("MenuEndConfirm");
+ // Page fn_1_F2518 (PAL 806028cc) keeps the largest start frame among the
+ // page's own controls. RaceConfirmPage (fn_1_3320C8, fn_1_332290) loads
+ // MenuEndConfirm/ButtonOK, Back/ButtonBackMenuEndConfirm, RaceConfirmBack/
+ // BlackBack and both obis - not MenuEndConfirm's ButtonBack (21).
+ case UiPage::Confirm:return std::max({delay("MenuEndConfirm","ButtonOK"),delay("Back","ButtonBackMenuEndConfirm"),delay("RaceConfirmBack","BlackBack"),
+                                       delay("MenuObiTopRaceConfirm","MenuEndConfirmObiTop"),delay("MenuObiBottomRaceConfirm","MenuEndConfirmObiBottom")});
  case UiPage::Pause:return maximum(uiPauseMenuControl(state));
- case UiPage::QuitConfirm:return maximum("YesNoButton");
+ // AfterMenuEndConfirm.brctr start frames: ButtonConfirmContinue 4, ButtonConfirmQuit 2.
+ case UiPage::QuitConfirm:return 4.f;
  case UiPage::Error:return delay("ConfirmOK","OK");
  default:return 0;
  }
@@ -102,13 +112,22 @@ float uiMenuExitHold(const MenuState& state,bool back){
   const auto* clip=uiFindAnimationClip("PressStart","eAFPressStart","PressStart");
   return clip&&clip->rate>0?clip->duration/clip->rate:0.f;
  }
+ // CharacterSelect's front handler (PAL 8083dfa8) passes max(OK delay,
+ // DriverModelMgr+0xc) to startReplace. The manager's ctor (fn_1_31FDCC,
+ // 80830180) stores there the longest sel_gut CHR0 of all menu drivers
+ // (fn_1_4AADC 8055ae90: frame count): Driver.szs fk.brres, 78 frames.
+ if(state.page==UiPage::Character)return std::max(uiButtonConfirmFrames(uiSelectedMenuControl(state)),78.f);
  return uiButtonConfirmFrames(uiSelectedMenuControl(state));
 }
 
 bool uiMenuChangesSection(UiPage from,UiPage to,UiAction action){
  if(action!=UiAction::None)return action!=UiAction::ResumeRace;
+ // The pause pages' Quit, Change Course and Change Character change section
+ // (RaceMenuPage_onButtonFront, PAL 0x8085A0F4, cases 1/5/6/0x18); only the
+ // GP Quit pushes page 0x2C (QuitConfirm) in the race section.
+ const bool leavesPause=(from==UiPage::Pause||from==UiPage::QuitConfirm)&&to!=UiPage::Pause&&to!=UiPage::QuitConfirm&&to!=UiPage::Race;
  return (from==UiPage::MainMenu&&to==UiPage::Mode)||(from==UiPage::Mode&&to==UiPage::MainMenu)
-     ||from==UiPage::Intro||to==UiPage::Intro||from==UiPage::Race||to==UiPage::Race;
+     ||from==UiPage::Intro||to==UiPage::Intro||from==UiPage::Race||to==UiPage::Race||leavesPause;
 }
 
 void MenuTransition::reset(){
@@ -180,11 +199,14 @@ bool MenuTransition::advance(MenuState& logical,unsigned ticks,bool incomingRead
   if(elapsed_>=duration){
    if(!entering){
     if(pending_!=UiAction::None){ready_=pending_;pending_=UiAction::None;phase_=Phase::Idle;break;}
-    if(closingModal_){logical.age=underlay_.age;logical.focusAge=underlay_.focusAge;hasUnderlay_=closingModal_=false;phase_=Phase::Idle;elapsed_=-1;changed=true;continue;}
+    if(closingModal_){logical.age=underlay_.age;logical.focusAge=underlay_.focusAge;logical.sectionAge=underlay_.sectionAge;hasUnderlay_=closingModal_=false;phase_=Phase::Idle;elapsed_=-1;changed=true;continue;}
     // The incoming page appears only once its assets are resident: hold the
     // completed exit (still presenting at 60 Hz) instead of blocking on I/O.
     if(!incomingReady){holding_=true;ticks=0;break;}
     phase_=skipEnter_?Phase::Idle:Phase::Enter;openingModal_=false;elapsed_=-1;logical.age=logical.focusAge=0;changed=true;
+    // The section's background runs on through a page change; a section
+    // change rebuilds the scene behind the fade.
+    logical.sectionAge=section_?0:outgoing_.sectionAge;
    }else{phase_=Phase::Idle;elapsed_=-1;}
    continue;
   }

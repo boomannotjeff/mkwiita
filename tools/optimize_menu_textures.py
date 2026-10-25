@@ -56,7 +56,9 @@ def measure():
     exe.parent.mkdir(parents=True, exist_ok=True)
     sources = ['tools/menu_sprite_scales.cpp', 'src/menu_ui.cpp', 'src/menu_state.cpp', 'src/menu_transition.cpp',
                'src/menu_focus.cpp', 'src/menu_index.cpp', 'src/menu_text_motion.cpp', 'src/progress.cpp']
-    subprocess.run(['clang++', '-std=c++2b', '-O2', '-I' + str(ROOT / 'include'), '-o', str(exe),
+    subprocess.run(['clang++', '-std=c++2b', '-O2', '-I' + str(ROOT / 'include'), '-I' + str(ROOT / 'vendor/kinoko/include'), '-I' + str(ROOT / 'vendor/kinoko/source'),
+                    # Kinoko's headers lean on GCC's transitive includes; libc++ needs them named.
+                    '-include', 'bit', '-include', 'algorithm', '-include', str(ROOT / 'tools/host_compat.hpp'), '-static', '-o', str(exe),
                     *[str(ROOT / s) for s in sources]], check=True)
     out = ROOT / 'build/host-tools/sprite-scales.json'
     subprocess.run([str(exe), str(out)], check=True)
@@ -216,6 +218,24 @@ def main():
     with ThreadPoolExecutor(max_workers=a.jobs) as pool:
         sprite_results = dict(zip(used, pool.map(lambda k: fit_sprite(k, records[k], screen[k]), used)))
         atlas_results = dict(zip(atlas_keys, pool.map(lambda k: fit_atlas(k, records[k], by_atlas[k], screen.get(k)), atlas_keys)))
+    # A sprite fitted by an earlier run but no longer measured keeps its header
+    # at the cook's full-size UVs; its .t3x must go back to the full-size image.
+    def restore(key):
+        source = ASSETS / records[key]['path'].replace('.t3x', '.png')
+        fitted = WORK / (records[key]['name'] + '.png')
+        if not fitted.is_file():
+            return False
+        with Image.open(source) as full, Image.open(fitted) as old:
+            full = full.convert('RGBA')
+            if full.size == old.size and full.tobytes() == old.convert('RGBA').tobytes():
+                return False
+        encode(full, records[key]['name'])
+        return True
+    # Keys can share one texture; a measured key's fitted file wins.
+    fitted_names = {records[k]['name'] for k in [*used, *atlas_keys]}
+    unmeasured = [k for k in records if k not in screen and k not in by_atlas and records[k]['name'] not in fitted_names]
+    with ThreadPoolExecutor(max_workers=a.jobs) as pool:
+        restored = sum(pool.map(restore, unmeasured))
     slice_uvs = {}
     for result in atlas_results.values():
         slice_uvs.update(result.pop('uvs'))
@@ -227,7 +247,7 @@ def main():
                'gpuBytesBefore': before, 'gpuBytesAfter': after, 'fileBytes': files,
                'header_sha256': hashlib.sha256(HEADER.read_bytes()).hexdigest()}
     (ASSETS / 'models/menu-texture-fit.json').write_text(json.dumps(receipt, indent=1) + '\n')
-    print(json.dumps({'sprites': len(sprite_results), 'atlases': len(atlas_results), 'slices': len(slice_uvs),
+    print(json.dumps({'sprites': len(sprite_results), 'restored': restored, 'atlases': len(atlas_results), 'slices': len(slice_uvs),
                       'gpuMBBefore': round(before / 2**20, 1), 'gpuMBAfter': round(after / 2**20, 1),
                       'fileMB': round(files / 2**20, 1)}, indent=1))
 

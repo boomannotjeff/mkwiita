@@ -13,12 +13,13 @@ re-cooked object is patched again. Patching is idempotent.
 """
 import json, struct
 from pathlib import Path
+from gx_material import GMDL_SUBMESH_BYTES
 
 ROOT = Path(__file__).resolve().parents[1]
 MODELS = ROOT / 'sd-card/3ds/mkw-3ds/models'
 DOUBLE_ALPHA = {'m_snakeFirePl', 'm_koopaBallPl'}
 COLOR_LERP = {'ef_flamePoleMat'}
-RECORD = {3: 44, 4: 56, 5: 92}  # GMDL submesh bytes (tools/gx_material.py GMDL_SUBMESH_BYTES)
+RECORD = GMDL_SUBMESH_BYTES  # GMDL submesh bytes by version
 
 
 def packed(c):

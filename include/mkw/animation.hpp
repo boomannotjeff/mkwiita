@@ -11,6 +11,12 @@ public:
     ~DriverAnimation(){reset();}
     bool load(const char* path,const Model& model);
     void reset();
+    // Whether the loaded bank sits in LINEAR (allocateBank) rather than the heap.
+    bool inLinear() const {return data_&&dataLinear_;}
+    // While on, banks go to LINEAR whenever it holds them, without the race
+    // reserve; the heap stays the fallback. Pause resume only: the player's
+    // banks return to the LINEAR they left (main.cpp restoreRaceGraphics).
+    static void keepLinear(bool on);
     // Menu PlayAnmNoBlend replaces the active palette without a gameplay blend.
     void clearPoseTransition(){lastClip_=-1;hasPreviousPose_=false;cachedSettled_=false;}
     int find(const char* name) const;
@@ -23,8 +29,17 @@ public:
     unsigned count() const {return count_;}
     float duration(unsigned clip) const {return clip<count_?clips_[clip].duration:0;}
     bool loop(unsigned clip) const {return clip<count_&&clips_[clip].loop;}
+    unsigned faceCount() const {return faceCount_;}
+    const char* faceName(unsigned face) const {return face<faceCount_?faces_[face].name:"none";}
+    float faceDuration(unsigned face) const {return face<faceCount_?faces_[face].duration:0;}
+    bool faceLoop(unsigned face) const {return face<faceCount_&&faces_[face].loop;}
     // A rejected current-pose bound skips only skinning/upload; palette transitions still advance.
     bool apply(Model& model,int clip,float frame,unsigned tick=0,int expression=-1,float expressionFrame=0,const ClipFrustum* frustum=nullptr);
+    // Gameplay driver pose with the retail crossfade (PlayerModel blend, fn_1_49114
+    // 0x805594C8): `from` keeps animating at its own frame while `clip` takes
+    // `weight` of the pose. Replaces apply()'s automatic six-frame transition.
+    struct ClipBlend {int clip=-1;float frame=0,weight=1;};
+    bool apply(Model& model,int clip,float frame,const ClipBlend& from,unsigned tick,int expression=-1,float expressionFrame=0,const ClipFrustum* frustum=nullptr);
     // Choose whether CPU fallback skins normals. Unlit course objects can
     // share each (position, matrix) pair instead (call after load).
     void skinNormals(bool on);
@@ -81,6 +96,8 @@ private:
     // Shared by apply() and pose(): interpolated (and blended) palette.
     void evaluate(const Clip& c,unsigned a,unsigned b,float t,unsigned tick,float blend);
     void stripHandlePivot();
+    // apply() after the transition weight is known: cache, skinning and face writes.
+    bool applyPose(Model& model,int clip,float frame,unsigned tick,int expression,float expressionFrame,const ClipFrustum* frustum,float blend);
     std::vector<std::vector<RigidPart>> rigidParts_;
     std::array<int,64> baseTextures_{};
     uint8_t* data_=nullptr;bool dataLinear_=false;const SourceVertex* source_=nullptr;const Range* ranges_=nullptr;

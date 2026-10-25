@@ -8,6 +8,7 @@ from fractions import Fraction
 from pathlib import Path
 import numpy as np
 from PIL import Image, ImageDraw
+from vita_controls_art import draw as draw_vita_controls
 from cook_race_hud import sections,string,layout,animation,sample,font_strings,variant
 from course_catalog import generated
 from cook_race_items import cook_image_sprite,decode_tpl,digest
@@ -153,7 +154,7 @@ def bake_border_loop(key,p,control,bindings,animations,animation_groups,render_a
   save(atlas_key,image,p)
  border_records.append(dict(key=key,control=control.stem,frames=period,duration=duration,rate=rate,center=[rect[0]+cx,rect[1]+cy,cw,ch],firstSlice=first_slice,sliceCount=len(border_slices)-first_slice,source=animations[index].relative_to(ROOT).as_posix(),frameHashes=[hashlib.sha256(image.tobytes()).hexdigest() for image in images]))
 
-def bake_panel(name,resource,states=('free','select'),exclude=(),bounds=None,overrides=None,hidden=(),group_states=None):
+def bake_panel(name,resource,states=('free','select'),exclude=(),bounds=None,overrides=None,hidden=(),group_states=None,window_frames=False):
  p=ROOT/'assets/menu-ui'/resource
  node_records[name]=pane_nodes(p)
  bindings=None;control=None
@@ -205,7 +206,15 @@ def bake_panel(name,resource,states=('free','select'),exclude=(),bounds=None,ove
    pane_overrides['black_base']={'alpha':128/255,'vertexColors':[vertex]*4}
   movie_panes=('black_base','black_base_00','black_base_01','black_base_02') if name=='mode' else ('black_base',) if name in ('main_button','main_multi','main_wifi','class','drift','vs','course','battle') else ()
   separate=tuple(sorted(dynamic_panes))
-  img,rect,panes=render_layout(p,source,animations,exclude=exclude,bounds=bounds,pane_overrides=pane_overrides,material_overrides=colors,animation_groups=animation_groups,exclude_exact=movie_panes+separate)
+  img,rect,panes=render_layout(p,source,animations,exclude=exclude,bounds=bounds,pane_overrides=pane_overrides,material_overrides=colors,animation_groups=animation_groups,exclude_exact=movie_panes+separate,window_frames=window_frames)
+  # The state's clips recolour its text (RLMC TEV colour 0/1, targets 4-6 and 8-10):
+  # the movie buttons' cream-gold captions. The layout alone holds only the grey default.
+  for clip in animations:
+   for (node,kind,target),keys in animation(clip)[1].items():
+    if kind=='RLMC' and panes.get(node,{}).get('kind')=='txt1' and (4<=target<=6 or 8<=target<=10):
+     colors_=[list(c) for c in panes[node]['textColors']]
+     colors_[0 if target<8 else 1][(target-4)%4]=int(max(0,min(255,round(sample(keys,0)))))
+     panes[node]['textColors']=colors_
   # Split at independently animated pictures, in BRLYT submission order.
   # Excluded pictures still write source depth in render_layout. Later static
   # chunks therefore need both depth-film-present and film-absent variants.
@@ -215,7 +224,7 @@ def bake_panel(name,resource,states=('free','select'),exclude=(),bounds=None,ove
   first_dynamic=pictures.index(ordered[0]) if ordered else len(pictures)
   before=tuple(pictures[:first_dynamic])
   if ordered:
-   img,_,_=render_layout(p,source,animations,exclude=exclude,bounds=rect,pane_overrides=pane_overrides,material_overrides=colors,animation_groups=animation_groups,exclude_exact=movie_panes+separate,include=before)
+   img,_,_=render_layout(p,source,animations,exclude=exclude,bounds=rect,pane_overrides=pane_overrides,material_overrides=colors,animation_groups=animation_groups,exclude_exact=movie_panes+separate,include=before,window_frames=window_frames)
   key=name+('_'+state if state else '')
   save(key,img,p);panel_records[key]=rect
   pane_records[key]=panes
@@ -223,11 +232,11 @@ def bake_panel(name,resource,states=('free','select'),exclude=(),bounds=None,ove
   if movie_panes:
    movie_z=panes[movie_panes[0]]['z']
    for suffix,z_range in [('underlay',(-float('inf'),movie_z)),('overlay',(movie_z,float('inf')))]:
-    layer,_,_=render_layout(p,source,animations,exclude=exclude,bounds=rect,pane_overrides=pane_overrides,material_overrides=colors,animation_groups=animation_groups,exclude_exact=movie_panes+separate,z_range=z_range,include=before if ordered else None)
+    layer,_,_=render_layout(p,source,animations,exclude=exclude,bounds=rect,pane_overrides=pane_overrides,material_overrides=colors,animation_groups=animation_groups,exclude_exact=movie_panes+separate,z_range=z_range,include=before if ordered else None,window_frames=window_frames)
     save(key+'_'+suffix,layer,p);panel_records[key+'_'+suffix]=rect
     if suffix=='underlay':loop_key=key+'_'+suffix;loop_image=layer;loop_z=z_range
   bake_border_loop(loop_key,p,control,bindings,animations,animation_groups,
-                   dict(exclude=exclude,pane_overrides=pane_overrides,material_overrides=colors,animation_groups=animation_groups,exclude_exact=movie_panes+separate,z_range=loop_z,include=before if ordered else None),rect,loop_image)
+                   dict(exclude=exclude,pane_overrides=pane_overrides,material_overrides=colors,animation_groups=animation_groups,exclude_exact=movie_panes+separate,z_range=loop_z,include=before if ordered else None,window_frames=window_frames),rect,loop_image)
   for at,member in enumerate(ordered):
    begin=pictures.index(member)+1;end=pictures.index(ordered[at+1]) if at+1<len(ordered) else len(pictures)
    after=tuple(n for n in pictures[begin:end] if n not in movie_panes and not any(x in n for x in exclude))
@@ -237,7 +246,7 @@ def bake_panel(name,resource,states=('free','select'),exclude=(),bounds=None,ove
     for mask in range(1<<(at+1)):
      depth_overrides=dict(pane_overrides)
      for bit,film in enumerate(ordered[:at+1]):depth_overrides[film]={**depth_overrides.get(film,{}),'alpha':float(bool(mask&(1<<bit))),'visible':True}
-     tail,_,_=render_layout(p,source,animations,exclude=exclude,bounds=rect,pane_overrides=depth_overrides,material_overrides=colors,animation_groups=animation_groups,exclude_exact=movie_panes+separate,z_range=z_range,include=after)
+     tail,_,_=render_layout(p,source,animations,exclude=exclude,bounds=rect,pane_overrides=depth_overrides,material_overrides=colors,animation_groups=animation_groups,exclude_exact=movie_panes+separate,z_range=z_range,include=after,window_frames=window_frames)
      box=tail.getbbox()
      if not box:continue
      tail_key=f'panel_tail_{name}_{state}_{at}_{part}_{mask}'
@@ -424,7 +433,9 @@ def main():
   ('rule_left','MenuSingle/control/blyt/common_w134_rule_rap_yaji_l.brlyt',('text',)),
   ('rule_right','MenuSingle/control/blyt/common_w135_rule_rap_yaji_r.brlyt',('text',)),
  ]
- for name,resource,exclude in specs:bake_panel(name,resource,exclude=exclude)
+ # The license cards' Window_00 is a one-frame nw4r window (frame drawing in
+ # menu_layout.render_layout, PAL 0x8007D520).
+ for name,resource,exclude in specs:bake_panel(name,resource,exclude=exclude,window_frames=name=='license')
  # VSSettingRadioOption: its Choice group shows the chosen option (ChoiceOn: the
  # red checker and active_text) apart from the others (ChoiceOff).
  for name,choice in [('rule_option','ChoiceOff'),('rule_option_on','ChoiceOn')]:
@@ -438,13 +449,19 @@ def main():
  empty_license=['mii']+[f'{prefix}_{i:02d}' for prefix in ['cc50','cc100','cc150','cc_mirror'] for i in range(8)]
  empty_license+=['n_0_kinoko','n_1_flower','n_2_star','n_3_special','r_0_koura','r_1_banana','r_2_konoha','r_3_thunder','n_2_hatena','n_3_hatena','r_2_hatena','r_3_hatena']
  for position in ['top','bottom']:
-  bake_panel('license_'+position+'_empty','Title/button/blyt/common_w076_license_icon_tex_'+position+'.brlyt',hidden=empty_license)
+  bake_panel('license_'+position+'_empty','Title/button/blyt/common_w076_license_icon_tex_'+position+'.brlyt',hidden=empty_license,window_frames=True)
+ # A used card's data panes, each baked alone and drawn into its pane (Composer::inPane):
+ # the cup icons with their "?" stand-ins, and the trophy colours for the results grid.
+ card=ROOT/'assets/menu-ui/Title/button/blyt/common_w076_license_icon_tex_top.brlyt'
+ for pane in ['n_0_kinoko','n_1_flower','n_2_star','n_3_special','r_0_koura','r_1_banana','r_2_konoha','r_3_thunder','n_2_hatena','n_3_hatena','r_2_hatena','r_3_hatena','bronze_color','silver_color','gold_color']:
+  im,rect,_=render_layout(card,source,include=(pane,));save('license_'+pane,im,card);panel_records['license_'+pane]=rect
  bake_panel('background','MenuSingle/bg/blyt/bg.brlyt',states=('',),bounds=(-304,-228,304,228))
  bake_panel('header','MenuSingle/bg/blyt/obi_top.brlyt',states=('',),bounds=(-304,-228,304,-125),overrides={'RootPane':{'x':2.1972661,'y':210}})
  bake_panel('footer','MenuSingle/bg/blyt/obi_bottom.brlyt',states=('',),bounds=(-304,125,304,228))
  bake_panel('footer_help','MenuSingle/bg/blyt/obi_bottom_message.brlyt',states=('',),bounds=(-304,125,304,228))
  bake_panel('confirm_top','MenuSingle/bg/blyt/obi_top_go.brlyt',states=('',),bounds=(-304,-110,304,40))
  bake_panel('confirm_bottom','MenuSingle/bg/blyt/obi_bottom_go.brlyt',states=('',),bounds=(-304,-20,304,100))
+ bake_panel('message','MenuSingle/message_window/blyt/common_w017_message.brlyt',states=('',),exclude=('text',))
  bake_panel('confirm_back','MenuSingle/message_window/blyt/black_down_race.brlyt',states=('',),bounds=(-304,-228,304,228))
  bake_panel('cup_course','MenuSingle/control/blyt/common_w137_course_movie_text_only.brlyt',bounds=(-154,-26,154,26),exclude=('text',))
  # BattleCup::ControlStages::Load explicitly hides the noninteractive row's
@@ -483,6 +500,9 @@ def main():
  for archive,name,y in [('Title','tt_title_screen_mario2_bokeboke.tpl',140),('Title_U','tt_title_screen_title_rogo_bokeboke.tpl',0)]:
   p=ROOT/'assets/menu-ui'/archive/'title/timg'/name;source(p);blur.alpha_composite(decode_tpl(p),(0,y))
  save('title_blur_scene',blur.crop((13,0,819,456)));panel_records['title_blur_scene']=[-304,-228,304,228]
+ # The pause menu's Vita controller picture and its label bars (tools/vita_controls_art.py).
+ global control_bars
+ image,rect,control_bars=draw_vita_controls();save('vita_controls',image,ROOT/'tools/vita_controls_art.py');panel_records['vita_controls']=rect
  drivers=['mario','luigi','peach','yoshi','baby_mario','baby_peach','kinopio','noko','wario','waluigi','donky','koopa','baby_daisy','baby_luigi','catherine','daisy','didy','karon','hone_koopa','funky','teresa','roseta','kinopico','koopa_jr','mii_suit_a','mii_suit_b']
  for i,n in enumerate(drivers):tpl('driver_'+str(i),UI/'button/timg'/f'tt_{n}_64x64.tpl')
  cups=['kinoko','flower','star','oukan','koura','banana','konoha','thunder']
@@ -507,7 +527,7 @@ def main():
    source(p);message_sources[p.relative_to(ROOT).as_posix()]=messages(p)
    if message_font_indices(p)!={1}:raise ValueError('This localized menu font mapping requires BMG font index 1: '+str(p))
  menu_messages=message_sources['assets/menu-ui/MenuSingle_U/message/Menu.bmg']
- help_ids={'UiHelpMain':[0x7e4,0x7e5,0x7e8,0x7ea],'UiHelpMainMulti':[0x7e5,0x7e6,0x7e7],'UiHelpWfc':[0x7e8,0x7e9],'UiHelpMode':[0xbea,0xbeb,0xbec,0xbee],'UiHelpEngineClasses':[0xbf4,0xbf5,0xbf6,0xbf7],'UiHelpDrift':[0xd16,0xd17],'UiHelpVSMode':[0xd8c,0xd8b]}
+ help_ids={'UiHelpMain':[0x7e4,0x7e5,0x7e8,0x7ea],'UiHelpMainMulti':[0x7e5,0x7e6,0x7e7],'UiHelpWfc':[0x7e8,0x7e9],'UiHelpMode':[0xbea,0xbeb,0xbec,0xbee],'UiHelpEngineClasses':[0xbf4,0xbf5,0xbf6,0xbf7],'UiHelpDrift':[0xd16,0xd17,0xcee],'UiHelpVSMode':[0xd8c,0xd8b],'UiHelpBattleMode':[0xcb2,0xcb3]}
  help_ids['UiHelpEngineClassesAllKartBike']=[0xbf8,0xbf9,0xbf6,0xbf7]
  # VS/Battle rules: one line per option (All, Karts, Bikes order for vehicles),
  # the race/win count, OK (race, battle) and the page (race, battle).
@@ -516,6 +536,9 @@ def main():
                   'UiHelpRulesStages':[0xd77,0xd78,0xd79],'UiHelpRulesItems':[0xd9d,0xd9e,0xd9f,0xda0],
                   'UiHelpRulesCount':[0xd89,0xd8a],'UiHelpRulesOk':[0xd90,0xd91],'UiHelpRules':[0xd92,0xd93]})
  help_text={name:[menu_messages[i] for i in ids] for name,ids in help_ids.items()}
+ # Message windows (common_w017_message): multi-line texts, baked one line at a time.
+ message_text={'UiMessageDriftHelp':menu_messages[0xced],'UiMessageBindControl':'Press a button to bind it.'}
+ message_lines=[l for v in message_text.values() for l in v.split('\n') if l]
  multiline_specs={menu_messages[i]:.7 for i in range(0x8fd,0x901)}
  multiline_specs.update({menu_messages[i]:.5 for i in range(0xbbe,0xbc4)})
  # Retro Rewind's 200cc caption, laid out as the engine-class messages above.
@@ -532,6 +555,7 @@ def main():
  labels+=['Mario','Luigi','Peach','Yoshi','Baby Mario','Baby Peach','Toad','Koopa Troopa','Wario','Waluigi','Donkey Kong','Bowser']
  labels+=course_names+[c['name'] for c in garage['choices']]+list('0123456789:.-/')
  labels+=[text for values in help_text.values() for text in values]
+ labels+=message_lines
  labels+=re.findall(r'\"([^\"]+)\"',(ROOT/'include/mkw/menu_ui.hpp').read_text())
  labels+=['Characters','Vehicles','Engine Classes','Cups','Courses','Select License','New','License','License 1','License 2','License 3','License 4','50cc','100cc','150cc','Mirror','Solo Race','Team Race','Balloon Battle','Coin Runners','Wii Stages','Retro Stages','Select Stage','Speed','Weight','Acceleration','Handling','Drift','Off-Road','Mini-Turbo','Karts Only','Bikes Only','Karts and Bikes','Press the A Button','OK','Back','Options','Mario Kart Channel','Grand Prix Race','Time Trial','VS Settings','Battle Settings','Unsupported race configuration','Create a license','Attach the Wii Remote wrist strap.','Press A to continue.','Please use the wrist strap.','A: Select','1 Player','2 Players','3 Players','4 Players','Race This Ghost','Watch the Replay','Solo Time Trials','Player','Players','Booster Seat','Flame Runner','Jet Bubble','Locked','Unlocked!']
  if RR:labels+=rr_cups+['L / R: More Cups','200cc','L / R: Skin','Default']+[f'Skin {n}' for n in range(1,10)]
@@ -548,19 +572,28 @@ def main():
  rule_rows=[menu_messages[i] for i in (0xd52,0xd5c,0xd66,0xd70,0xd4e,0xd98,0xd7a,0xd7c)]
  rule_options=[menu_messages[i] for i in (0xd53,0xd54,0xd55,0xd56,0xd5d,0xd5e,0xd5f,0xd69,0xd67,0xd68,0xd71,0xd72,0xd73,0xd99,0xd9a,0xd9b,0xd9c)]
  rule_counts=[menu_messages[0xd7b]+str(n) for n in UI_RACE_COUNTS]+[menu_messages[0xd84]+str(n) for n in UI_BATTLE_WINS]
+ # Options (port pages): the settings rows, their values and help lines.
+ controls_source=(ROOT/'include/mkw/controls.hpp').read_text()
+ def controls_strings(name):return re.findall(r'"([^"]+)"',controls_source.split(name,1)[1].split('};',1)[0])
+ setting_rows=['Controls','Framerate','Minimap','Unlock Everything']+controls_strings('ControlActionNames')
+ setting_values=['Steer','Trick','Default','Classic','60 FPS','30 FPS','Wii','Outline','On','Off']+controls_strings('ControlButtonNames')
+ # Staff ghosts' Mii names for the ghost card (tools/cook_staff_ghost_runs.py).
+ staff_info=ROOT/'include/mkw/staff_ghost_info.hpp'
+ staff_names=[json.loads('"'+n+'"') for n in re.findall(r'\{"((?:[^"\\]|\\.)+)",\{',staff_info.read_text(encoding='utf-8'))] if staff_info.is_file() else []
+ options_help=['Left / Right: change the ghost.',"View this license's records.","Change this license's Mii.",'Erase this license.','Left / Right: change the cup.','Change the race controls.','Change the game settings.','Choose an action, then press its button.','Classic: Square brakes, Circle looks behind.','Default: Circle brakes, Square looks behind.','Left / Right: change the setting.']
  roles={
-  'header_text':['Main Menu','Select License','Characters','Vehicles','Engine Classes','Cups','Courses','Drift','Grand Prix','Time Trials','Single Player','VS','Battle','Stages','Ghosts','Wii Stages','Retro Stages','Select Stage','Start Race','Rules'],
-  'rule_row':rule_rows,'rule_option':rule_options+(['200cc'] if RR else []),'rule_option_on':rule_options+(['200cc'] if RR else []),'rule_value_text':rule_counts,
-  'footer_help':[v for vv in help_text.values() for v in vv]+(['L / R: More Cups','L / R: Skin'] if RR else []),
+  'header_text':['Main Menu','Select License','Characters','Vehicles','Engine Classes','Cups','Courses','Drift','Grand Prix','Time Trials','Single Player','VS','Battle','Stages','Ghosts','Wii Stages','Retro Stages','Select Stage','Start Race','Rules','Options','Controls','Settings','License Settings','Records','Erase this license?'],
+  'rule_row':rule_rows+setting_rows+course_names+['Mushroom Cup','Flower Cup','Star Cup','Special Cup','Shell Cup','Banana Cup','Leaf Cup','Lightning Cup']+rr_cups,'rule_option':rule_options+(['200cc'] if RR else []),'rule_option_on':rule_options+(['200cc'] if RR else []),'rule_value_text':rule_counts+setting_values+list('0123456789:.-'),
+  'footer_help':[v for vv in help_text.values() for v in vv]+options_help+(['L / R: More Cups','L / R: Skin'] if RR else []),
   'main':['Single Player','Multiplayer','Nintendo WFC','Mario Kart Channel'],
   'main_button':['1','Player','1\nPlayer'],'main_multi':['2','3','4','Players','2\nPlayers','3\nPlayers','4\nPlayers'],'main_wifi':['1','2','Player','Players','1\nPlayer','2\nPlayers'],
   'mode':['Grand Prix','Time Trials','VS','Battle'], 'class':['50cc','100cc','150cc','Mirror']+[menu_messages[i] for i in range(0xbbe,0xbc4)]+rr_class,
   'class_switch':['Switch'],
   'license':['NEW','New','License','License 1','License 2','License 3','License 4','50cc','100cc','150cc','Mirror'],
-  'option':['Settings'],'license_edit':['License Settings'],
-  'drift_help':['Help'],
+  'option':['Settings','Options'],'license_edit':['License Settings'],
+  'drift_help':['Help','Rules'],'message':message_lines+controls_strings('ControlActionNames'),
   # License names are set per character (Composer::chars), from the keyboard's allowed set.
-  'license_top_empty':['NEW']+list(LICENSE_NAME_CHARS),'license_bottom_empty':['NEW']+list(LICENSE_NAME_CHARS),
+  'license_top_empty':['NEW','50cc','100cc','150cc','Mirror']+list(LICENSE_NAME_CHARS),'license_bottom_empty':['NEW','50cc','100cc','150cc','Mirror']+list(LICENSE_NAME_CHARS),
   'character_name':character_labels,'vehicle_name':vehicle_labels,
   'vehicle_ability':['Speed','Weight','Acceleration','Handling','Drift','Off-Road','Mini-Turbo'],
   'drift':['Automatic','Manual'],'cup':['Mushroom Cup','Flower Cup','Star Cup','Special Cup','Shell Cup','Banana Cup','Leaf Cup','Lightning Cup','Wii Stages','Retro Stages']+rr_cups, 'character':[], 'vehicle':[],
@@ -568,11 +601,11 @@ def main():
   'battle_course':battle_labels,
   'ghost':['Race This Ghost','Watch the Replay','Solo Time Trials'],
   # The ghost card's time is set per character (Composer::chars): 1'23"456.
-  'ghost_info':course_names+character_labels+list('0123456789\'"'),
+  'ghost_info':course_names+character_labels+staff_names+list('0123456789\'"'),
   'course':course_names+battle_labels,'vs':['Solo Race','Team Race'],'battle':['Balloon Battle','Coin Runners'],
   'confirm':['OK','Start Race','Race This Ghost','Watch the Replay','Solo Time Trials'],
   'back':['←Back','Back'],
-  'button':['Race This Ghost','Watch the Replay','Solo Time Trials','Yes','No','Continue','Restart','Quit','Race Again','Change Course','Change Character','Main Menu','Not available','OK']}
+  'button':['Race This Ghost','Watch the Replay','Solo Time Trials','Yes','No','Continue','Restart','Quit','Race Again','Change Course','Change Character','Main Menu','Not available','OK','Controls','Settings','Records','Change Mii','Erase License']}
  for required in roles.values():
   for label in required:
    if label not in labels:labels.append(label)
@@ -701,6 +734,9 @@ def main():
  for n,r in records.items():lines.append('{'+','.join([json.dumps(n),json.dumps(r['path']),*(f'{float(r[k]):.8f}f' for k in ['width','height','u','v']),json.dumps(r.get('text','')),str(r.get('font',0)),str(r.get('style',0)),str(r['padded'][0]*r['padded'][1]*4)])+'},')
  lines+=['};']
  for name,values in help_text.items():lines.append('inline constexpr const char* '+name+'[]={'+','.join(json.dumps(v) for v in values)+'};')
+ lines.append('struct UiControlBar {const char* button;float x,y,w,h;};')
+ lines.append('inline constexpr UiControlBar UiControlBars[]={'+','.join('{%s,%g,%g,%g,%g}'%(json.dumps(n),x,y,w,h) for n,x,y,w,h in control_bars)+'};')
+ for name,value in message_text.items():lines.append('inline constexpr const char* '+name+'='+json.dumps(value)+';')
  lines+=['inline constexpr unsigned UiDriverStats[27][7]={'+','.join('{'+','.join(str(v) for v in row)+'}' for row in driver_stats)+'};','inline constexpr unsigned UiVehicleStats[3][12][7]={'+','.join('{'+','.join('{'+','.join(str(v) for v in row)+'}' for row in group)+'}' for group in vehicle_stats)+'};']
  lines+=['struct UiControlPose {const char* control;const char* variant;float x,y,z,sx,sy,alpha;};','inline constexpr UiControlPose UiControlPoses[]={']
  for control,variants in ctr.items():
